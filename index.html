@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ScoutVision — Football Analytics</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,700;1,300&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:      #080C12;
+    --surface: #0E1420;
+    --card:    #131B28;
+    --border:  #1E2D42;
+    --green:   #00E676;
+    --green2:  #00C853;
+    --cyan:    #18FFFF;
+    --amber:   #FFD600;
+    --red:     #FF4D6D;
+    --text:    #E8F0FE;
+    --muted:   #5C7A9C;
+    --pitch:   #1B4D2E;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── GRID BACKGROUND ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 0;
+    background-image:
+      linear-gradient(rgba(0,230,118,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,230,118,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  /* ── NAV ── */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 40px; height: 64px;
+    background: rgba(8,12,18,0.85);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border);
+  }
+  .logo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 26px; letter-spacing: 3px;
+    color: var(--green);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .logo-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(1.5)} }
+  .nav-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 4px 12px; border-radius: 20px;
+  }
+
+  /* ── MAIN LAYOUT ── */
+  main {
+    position: relative; z-index: 1;
+    max-width: 1100px; margin: 0 auto;
+    padding: 100px 24px 60px;
+  }
+
+  /* ── HERO ── */
+  .hero { text-align: center; margin-bottom: 60px; }
+  .hero-eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 4px; text-transform: uppercase;
+    color: var(--green); margin-bottom: 20px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .hero-eyebrow::before, .hero-eyebrow::after {
+    content: ''; flex: 1; max-width: 60px; height: 1px; background: var(--green); opacity: 0.4;
+  }
+  h1 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: clamp(52px, 8vw, 96px);
+    line-height: 0.95; letter-spacing: 2px;
+    margin-bottom: 20px;
+  }
+  h1 span { color: var(--green); }
+  .hero p {
+    color: var(--muted); font-size: 17px; font-weight: 300;
+    max-width: 480px; margin: 0 auto 0;
+  }
+
+  /* ── UPLOAD ZONE ── */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 16px;
+    padding: 60px 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s;
+    background: var(--surface);
+    position: relative; overflow: hidden;
+    margin-bottom: 40px;
+  }
+  .upload-zone::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 50% 0%, rgba(0,230,118,0.06), transparent 60%);
+    pointer-events: none;
+  }
+  .upload-zone:hover, .upload-zone.drag-over {
+    border-color: var(--green);
+    background: rgba(0,230,118,0.04);
+  }
+  .upload-zone.drag-over { transform: scale(1.01); }
+  .upload-icon {
+    font-size: 56px; margin-bottom: 16px;
+    animation: float 3s ease-in-out infinite;
+  }
+  @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+  .upload-zone h2 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 28px; letter-spacing: 2px;
+    color: var(--text); margin-bottom: 8px;
+  }
+  .upload-zone p { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+  .upload-formats {
+    display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+    margin-bottom: 28px;
+  }
+  .fmt-tag {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    padding: 4px 10px; border-radius: 4px;
+    background: var(--card); border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .btn-upload {
+    background: var(--green); color: #000;
+    font-family: 'DM Sans', sans-serif; font-weight: 700;
+    font-size: 15px; letter-spacing: 0.5px;
+    padding: 14px 36px; border-radius: 8px;
+    border: none; cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .btn-upload:hover { background: var(--cyan); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,230,118,0.3); }
+  #fileInput { display: none; }
+
+  /* ── VIDEO PREVIEW ── */
+  .video-preview {
+    display: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 32px;
+  }
+  .video-preview.show { display: flex; align-items: center; gap: 20px; }
+  .video-thumb {
+    width: 120px; height: 68px; border-radius: 8px;
+    background: var(--card); display: flex; align-items: center; justify-content: center;
+    font-size: 32px; flex-shrink: 0;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .video-thumb video { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; }
+  .video-info { flex: 1; }
+  .video-name { font-weight: 600; font-size: 15px; margin-bottom: 4px; word-break: break-all; }
+  .video-meta { color: var(--muted); font-size: 13px; font-family: 'JetBrains Mono', monospace; }
+  .btn-analyze {
+    background: linear-gradient(135deg, var(--green), var(--cyan));
+    color: #000; font-weight: 700; font-size: 16px;
+    padding: 14px 32px; border-radius: 8px; border: none;
+    cursor: pointer; transition: all 0.2s; white-space: nowrap;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .btn-analyze:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(0,230,118,0.4); }
+  .btn-analyze:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  /* ── PROGRESS ── */
+  .progress-section {
+    display: none; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 16px;
+    padding: 36px; margin-bottom: 40px;
+  }
+  .progress-section.show { display: block; }
+  .progress-title {
+    font-family: 'Bebas Neue', sans-serif; font-size: 22px;
+    letter-spacing: 2px; margin-bottom: 28px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .spinner {
+    width: 20px; height: 20px; border-radius: 50%;
+    border: 2px solid var(--border); border-top-color: var(--green);
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .steps { display: flex; flex-direction: column; gap: 14px; }
+  .step {
+    display: flex; align-items: center; gap: 14px;
+    font-size: 14px; color: var(--muted);
+    transition: color 0.3s;
+  }
+  .step.active { color: var(--text); }
+  .step.done { color: var(--green); }
+  .step-icon {
+    width: 32px; height: 32px; border-radius: 50%;
+    border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; flex-shrink: 0;
+    transition: all 0.3s; background: var(--card);
+  }
+  .step.active .step-icon { border-color: var(--green); background: rgba(0,230,118,0.1); }
+  .step.done .step-icon { border-color: var(--green); background: var(--green); color: #000; font-weight: 700; }
+  .progress-bar-wrap {
+    margin-top: 28px; background: var(--card);
+    border-radius: 4px; height: 4px; overflow: hidden;
+  }
+  .progress-bar {
+    height: 100%; background: linear-gradient(90deg, var(--green), var(--cyan));
+    border-radius: 4px; width: 0%;
+    transition: width 0.5s ease;
+    box-shadow: 0 0 12px rgba(0,230,118,0.6);
+  }
+  .progress-pct {
+    text-align: right; font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; color: var(--green); margin-top: 8px;
+  }
+
+  /* ── RESULTS ── */
+  .results-section { display: none; }
+  .results-section.show { display: block; }
+
+  .results-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 32px; flex-wrap: gap;
+  }
+  .results-title {
+    font-family: 'Bebas Neue', sans-serif; font-size: 36px; letter-spacing: 2px;
+  }
+  .results-title span { color: var(--green); }
+  .btn-download-all {
+    background: transparent; border: 1px solid var(--green);
+    color: var(--green); font-weight: 600; font-size: 14px;
+    padding: 10px 24px; border-radius: 8px; cursor: pointer;
+    transition: all 0.2s; display: flex; align-items: center; gap: 8px;
+  }
+  .btn-download-all:hover { background: var(--green); color: #000; }
+
+  /* Team Summary */
+  .team-stats {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 12px; margin-bottom: 32px;
+  }
+  .stat-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px;
+    position: relative; overflow: hidden;
+  }
+  .stat-card::before {
+    content: ''; position: absolute; bottom: 0; left: 0; right: 0;
+    height: 2px;
+  }
+  .stat-card.green::before { background: var(--green); }
+  .stat-card.cyan::before { background: var(--cyan); }
+  .stat-card.amber::before { background: var(--amber); }
+  .stat-card.red::before { background: var(--red); }
+  .stat-label { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+  .stat-value { font-family: 'Bebas Neue', sans-serif; font-size: 36px; letter-spacing: 1px; }
+  .stat-card.green .stat-value { color: var(--green); }
+  .stat-card.cyan .stat-value { color: var(--cyan); }
+  .stat-card.amber .stat-value { color: var(--amber); }
+  .stat-card.red .stat-value { color: var(--red); }
+  .stat-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* Player Cards */
+  .section-label {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 3px; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+  }
+  .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  .players-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px; margin-bottom: 48px;
+  }
+
+  .player-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+    transition: all 0.25s; cursor: pointer;
+  }
+  .player-card:hover { border-color: var(--green); transform: translateY(-3px); box-shadow: 0 12px 32px rgba(0,0,0,0.4); }
+
+  .player-card-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, var(--surface), var(--card));
+    border-bottom: 1px solid var(--border);
+  }
+  .player-num {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 42px; line-height: 1; color: var(--green);
+    opacity: 0.15; position: absolute;
+    right: 16px; top: 12px;
+  }
+  .player-id-badge {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--muted); background: var(--bg);
+    padding: 3px 8px; border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  .player-name {
+    font-weight: 700; font-size: 16px;
+  }
+  .player-pos {
+    font-size: 12px; color: var(--muted); margin-top: 2px;
+  }
+  .rating-badge {
+    width: 44px; height: 44px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Bebas Neue', sans-serif; font-size: 20px;
+    border: 2px solid;
+  }
+  .rating-high { border-color: var(--green); color: var(--green); background: rgba(0,230,118,0.1); }
+  .rating-mid  { border-color: var(--amber); color: var(--amber); background: rgba(255,214,0,0.1); }
+  .rating-low  { border-color: var(--red);   color: var(--red);   background: rgba(255,77,109,0.1); }
+
+  .player-card-body { padding: 16px 20px; }
+  .player-metrics {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 10px; margin-bottom: 14px;
+  }
+  .metric-item { }
+  .metric-label { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+  .metric-value { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 600; }
+  .metric-value.green { color: var(--green); }
+  .metric-value.cyan  { color: var(--cyan); }
+  .metric-value.amber { color: var(--amber); }
+  .metric-value.red   { color: var(--red); }
+
+  /* Mini bar chart */
+  .mini-bar-label { font-size: 10px; color: var(--muted); margin-bottom: 4px; display: flex; justify-content: space-between; }
+  .mini-bar-track { background: var(--bg); border-radius: 2px; height: 4px; margin-bottom: 8px; overflow: hidden; }
+  .mini-bar-fill { height: 100%; border-radius: 2px; transition: width 1s ease; }
+  .fill-green { background: var(--green); }
+  .fill-cyan  { background: var(--cyan); }
+  .fill-amber { background: var(--amber); }
+  .fill-red   { background: var(--red); }
+
+  /* Pitch mini */
+  .mini-pitch-wrap { margin-top: 12px; }
+  .mini-pitch {
+    width: 100%; height: 90px; background: var(--pitch);
+    border-radius: 6px; position: relative; overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .pitch-line {
+    position: absolute; background: rgba(255,255,255,0.2);
+  }
+  .pitch-center-v { left: 50%; top: 0; bottom: 0; width: 1px; }
+  .pitch-center-c {
+    left: 50%; top: 50%; transform: translate(-50%,-50%);
+    width: 30px; height: 30px; border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: transparent;
+    position: absolute;
+  }
+  .player-dot {
+    position: absolute; width: 10px; height: 10px;
+    border-radius: 50%; background: var(--green);
+    transform: translate(-50%,-50%);
+    box-shadow: 0 0 8px var(--green);
+  }
+  .btn-detail {
+    width: 100%; background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted); font-size: 13px; font-weight: 600;
+    padding: 9px; border-radius: 6px; cursor: pointer;
+    transition: all 0.2s; margin-top: 12px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .btn-detail:hover { border-color: var(--green); color: var(--green); }
+
+  /* ── MODAL ── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; z-index: 200;
+    background: rgba(0,0,0,0.85); backdrop-filter: blur(8px);
+    align-items: center; justify-content: center; padding: 24px;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; width: 100%; max-width: 680px;
+    max-height: 90vh; overflow-y: auto;
+    animation: slideUp 0.3s ease;
+  }
+  @keyframes slideUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 24px; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; background: var(--surface); z-index: 1;
+  }
+  .modal-title { font-family: 'Bebas Neue', sans-serif; font-size: 24px; letter-spacing: 2px; }
+  .modal-close {
+    background: var(--card); border: 1px solid var(--border);
+    color: var(--muted); width: 32px; height: 32px; border-radius: 6px;
+    cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+  }
+  .modal-close:hover { border-color: var(--red); color: var(--red); }
+  .modal-body { padding: 24px; }
+  .modal-kpis {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 24px;
+  }
+  .modal-kpi {
+    background: var(--card); border-radius: 8px; padding: 16px;
+    border-left: 3px solid;
+  }
+  .modal-kpi.g { border-color: var(--green); }
+  .modal-kpi.c { border-color: var(--cyan); }
+  .modal-kpi.a { border-color: var(--amber); }
+  .modal-kpi.r { border-color: var(--red); }
+  .modal-kpi .label { font-size: 11px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
+  .modal-kpi .val { font-family: 'Bebas Neue', sans-serif; font-size: 32px; }
+  .modal-kpi.g .val { color: var(--green); }
+  .modal-kpi.c .val { color: var(--cyan); }
+  .modal-kpi.a .val { color: var(--amber); }
+  .modal-kpi.r .val { color: var(--red); }
+
+  /* Pitch Modal */
+  .modal-pitch {
+    width: 100%; height: 200px; background: var(--pitch);
+    border-radius: 10px; position: relative; overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.08); margin-bottom: 20px;
+  }
+  .modal-player-dot {
+    position: absolute; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--green); transform: translate(-50%,-50%);
+    box-shadow: 0 0 20px rgba(0,230,118,0.8);
+  }
+  .modal-player-dot::after {
+    content: ''; position: absolute; inset: -6px; border-radius: 50%;
+    border: 1px solid rgba(0,230,118,0.3);
+  }
+  .heat-zone {
+    position: absolute; border-radius: 50%;
+    background: radial-gradient(ellipse, rgba(0,230,118,0.25), transparent 70%);
+    transform: translate(-50%,-50%);
+  }
+
+  /* Speed zones */
+  .speed-zones {
+    display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 20px;
+  }
+  .zone { background: var(--card); border-radius: 8px; padding: 12px; text-align: center; }
+  .zone-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+  .zone-bar { height: 3px; border-radius: 2px; margin-bottom: 6px; }
+  .zone-pct { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600; }
+
+  .modal-footer {
+    padding: 16px 24px; border-top: 1px solid var(--border);
+    display: flex; gap: 10px;
+  }
+  .btn-pdf {
+    flex: 1; background: var(--green); color: #000;
+    font-weight: 700; font-size: 14px; padding: 12px;
+    border-radius: 8px; border: none; cursor: pointer;
+    transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .btn-pdf:hover { background: var(--cyan); }
+  .btn-close2 {
+    background: var(--card); color: var(--muted);
+    border: 1px solid var(--border); font-size: 14px; padding: 12px 20px;
+    border-radius: 8px; cursor: pointer;
+  }
+
+  /* ── EMPTY HEATMAP ── */
+  .heatmap-placeholder {
+    width: 100%; height: 200px; background: var(--card);
+    border-radius: 10px; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 13px; margin-bottom: 20px;
+    border: 1px dashed var(--border);
+  }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 640px) {
+    nav { padding: 0 20px; }
+    main { padding: 84px 16px 40px; }
+    .team-stats { grid-template-columns: repeat(2,1fr); }
+    .players-grid { grid-template-columns: 1fr; }
+    .modal-kpis { grid-template-columns: 1fr; }
+    .speed-zones { grid-template-columns: repeat(2,1fr); }
+  }
+
+  /* ── TOAST ── */
+  .toast {
+    position: fixed; bottom: 24px; right: 24px; z-index: 999;
+    background: var(--card); border: 1px solid var(--green);
+    color: var(--text); padding: 14px 20px; border-radius: 10px;
+    font-size: 14px; display: none; align-items: center; gap: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    animation: toastIn 0.3s ease;
+  }
+  @keyframes toastIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+  .toast.show { display: flex; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    ScoutVision
+  </div>
+  <div class="nav-badge">Football Analytics v1.0</div>
+</nav>
+
+<main>
+  <!-- HERO -->
+  <div class="hero">
+    <div class="hero-eyebrow">AI-Powered · Player Tracking · YOLOv8</div>
+    <h1>ANALISIS<br><span>TAKTIK</span><br>SEPAK BOLA</h1>
+    <p>Upload video pertandingan atau latihan, dapatkan laporan lengkap per pemain dalam hitungan menit.</p>
+  </div>
+
+  <!-- UPLOAD -->
+  <div class="upload-zone" id="uploadZone">
+    <div class="upload-icon">⚽</div>
+    <h2>DROP VIDEO DI SINI</h2>
+    <p>atau klik untuk pilih file dari komputer</p>
+    <div class="upload-formats">
+      <span class="fmt-tag">MP4</span>
+      <span class="fmt-tag">MOV</span>
+      <span class="fmt-tag">AVI</span>
+      <span class="fmt-tag">MKV</span>
+    </div>
+    <button class="btn-upload" onclick="document.getElementById('fileInput').click()">
+      ↑ Pilih Video
+    </button>
+    <input type="file" id="fileInput" accept="video/*">
+  </div>
+
+  <!-- VIDEO PREVIEW -->
+  <div class="video-preview" id="videoPreview">
+    <div class="video-thumb" id="videoThumb">🎬</div>
+    <div class="video-info">
+      <div class="video-name" id="videoName">—</div>
+      <div class="video-meta" id="videoMeta">—</div>
+    </div>
+    <button class="btn-analyze" id="btnAnalyze" onclick="startAnalysis()">
+      ▶ Analisis Sekarang
+    </button>
+  </div>
+
+  <!-- PROGRESS -->
+  <div class="progress-section" id="progressSection">
+    <div class="progress-title">
+      <div class="spinner" id="spinner"></div>
+      MEMPROSES VIDEO...
+    </div>
+    <div class="steps">
+      <div class="step" id="step1">
+        <div class="step-icon">1</div>
+        <div>
+          <div style="font-weight:500">Deteksi Pemain (YOLOv8)</div>
+          <div style="font-size:12px;color:var(--muted)">Menganalisa setiap frame video</div>
+        </div>
+      </div>
+      <div class="step" id="step2">
+        <div class="step-icon">2</div>
+        <div>
+          <div style="font-weight:500">Tracking ID per Pemain (ByteTrack)</div>
+          <div style="font-size:12px;color:var(--muted)">Melacak pergerakan individu</div>
+        </div>
+      </div>
+      <div class="step" id="step3">
+        <div class="step-icon">3</div>
+        <div>
+          <div style="font-weight:500">Kalkulasi Metrik</div>
+          <div style="font-size:12px;color:var(--muted)">Jarak, sprint, kecepatan, posisi</div>
+        </div>
+      </div>
+      <div class="step" id="step4">
+        <div class="step-icon">4</div>
+        <div>
+          <div style="font-weight:500">Generate Heatmap & Laporan PDF</div>
+          <div style="font-size:12px;color:var(--muted)">Visualisasi dan laporan per pemain</div>
+        </div>
+      </div>
+    </div>
+    <div class="progress-bar-wrap">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+    <div class="progress-pct" id="progressPct">0%</div>
+  </div>
+
+  <!-- RESULTS -->
+  <div class="results-section" id="resultsSection">
+    <div class="results-header">
+      <div class="results-title">HASIL <span>ANALISIS</span></div>
+      <button class="btn-download-all" onclick="downloadAllPDF()">
+        ↓ Download Semua PDF
+      </button>
+    </div>
+
+    <!-- Team Stats -->
+    <div class="section-label">Statistik Tim</div>
+    <div class="team-stats" id="teamStats"></div>
+
+    <!-- Player Cards -->
+    <div class="section-label">Laporan Per Pemain</div>
+    <div class="players-grid" id="playersGrid"></div>
+  </div>
+</main>
+
+<!-- MODAL DETAIL -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="modalTitle">DETAIL PEMAIN</div>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-kpis" id="modalKpis"></div>
+      <div id="modalPitch"></div>
+      <div class="section-label" style="margin-bottom:12px">Zona Kecepatan</div>
+      <div class="speed-zones" id="modalSpeedZones"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-pdf" id="btnDownloadPDF" onclick="downloadPlayerPDF()">
+        ↓ Download PDF Laporan
+      </button>
+      <button class="btn-close2" onclick="closeModal()">Tutup</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast">
+  <span>✓</span>
+  <span id="toastMsg">Berhasil!</span>
+</div>
+
+<script>
+// ── DATA ─────────────────────────────────────────────
+let selectedFile = null;
+let analysisData = null;
+let currentPlayer = null;
+
+// ── UPLOAD ZONE ──────────────────────────────────────
+const uploadZone = document.getElementById('uploadZone');
+const fileInput  = document.getElementById('fileInput');
+
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault(); uploadZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('video/')) handleFile(f);
+});
+uploadZone.addEventListener('click', e => {
+  if (e.target === uploadZone || e.target.tagName === 'P' || e.target.tagName === 'H2')
+    fileInput.click();
+});
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+
+function handleFile(file) {
+  selectedFile = file;
+  const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+
+  document.getElementById('videoName').textContent = file.name;
+  document.getElementById('videoMeta').textContent = `${sizeMB} MB · ${file.type}`;
+
+  // Video thumbnail
+  const thumb = document.getElementById('videoThumb');
+  const vid = document.createElement('video');
+  vid.src = URL.createObjectURL(file);
+  vid.muted = true;
+  vid.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:8px;';
+  vid.currentTime = 2;
+  thumb.innerHTML = '';
+  thumb.appendChild(vid);
+
+  document.getElementById('videoPreview').classList.add('show');
+  uploadZone.style.display = 'none';
+}
+
+// ── ANALYSIS SIMULATION ──────────────────────────────
+function startAnalysis() {
+  document.getElementById('videoPreview').style.display = 'none';
+  document.getElementById('progressSection').classList.add('show');
+
+  const steps = ['step1','step2','step3','step4'];
+  const durations = [2500, 2000, 1500, 2000];
+  let stepIdx = 0;
+  let totalTime = durations.reduce((a,b) => a+b, 0);
+  let elapsed = 0;
+
+  // Activate first step
+  document.getElementById(steps[0]).classList.add('active');
+
+  function nextStep() {
+    if (stepIdx >= steps.length) {
+      finishAnalysis();
+      return;
+    }
+    const dur = durations[stepIdx];
+    const stepStart = elapsed;
+
+    const interval = setInterval(() => {
+      elapsed += 50;
+      const pct = Math.min((elapsed / totalTime) * 100, 100);
+      document.getElementById('progressBar').style.width = pct + '%';
+      document.getElementById('progressPct').textContent = Math.round(pct) + '%';
+    }, 50);
+
+    setTimeout(() => {
+      clearInterval(interval);
+      document.getElementById(steps[stepIdx]).classList.remove('active');
+      document.getElementById(steps[stepIdx]).classList.add('done');
+      document.getElementById(steps[stepIdx]).querySelector('.step-icon').textContent = '✓';
+      stepIdx++;
+      elapsed = stepStart + dur;
+      if (stepIdx < steps.length) {
+        document.getElementById(steps[stepIdx]).classList.add('active');
+      }
+      nextStep();
+    }, dur);
+  }
+
+  nextStep();
+}
+
+function finishAnalysis() {
+  document.getElementById('spinner').style.display = 'none';
+  document.getElementById('progressBar').style.width = '100%';
+  document.getElementById('progressPct').textContent = '100%';
+
+  setTimeout(() => {
+    document.getElementById('progressSection').classList.remove('show');
+    analysisData = generateMockData();
+    renderResults();
+    showToast('Analisis selesai! ' + analysisData.players.length + ' pemain terdeteksi.');
+  }, 600);
+}
+
+// ── MOCK DATA ─────────────────────────────────────────
+function generateMockData() {
+  const positions = ['ST','LW','RW','CAM','CM','CDM','LB','RB','CB','CB','GK',
+                     'ST','LW','RW','CAM','CM','CDM','LB','RB','CB','CB','GK'];
+  const teamA = [0,1,2,3,4,5,6,7,8,9,10];
+  const teamB = [11,12,13,14,15,16,17,18,19,20,21];
+
+  const players = Array.from({length: 22}, (_, i) => {
+    const isTeamA = teamA.includes(i);
+    const dist = +(Math.random() * 1.2 + 0.3).toFixed(3);
+    const sprintDist = +(dist * (Math.random()*0.3+0.1)).toFixed(3);
+    const topSpeed = +(Math.random()*15+20).toFixed(1);
+    const sprints = Math.floor(Math.random()*12+2);
+    const avgX = isTeamA ? Math.random()*45+5 : Math.random()*45+55;
+    const avgY = Math.random()*50+9;
+    const rating = Math.min(10, Math.max(5, +(dist*5 + sprints*0.2 + topSpeed*0.05).toFixed(1)));
+
+    return {
+      id: i+1, trackId: Math.floor(Math.random()*900+100),
+      position: positions[i],
+      team: isTeamA ? 'Tim A' : 'Tim B',
+      teamColor: isTeamA ? '#00E676' : '#18FFFF',
+      totalDist: dist,
+      sprintDist, topSpeed, sprints,
+      avgX, avgY, rating,
+      walk: +(Math.random()*0.4+0.1).toFixed(3),
+      jog:  +(Math.random()*0.3+0.1).toFixed(3),
+      hiRun:+(Math.random()*0.2+0.05).toFixed(3),
+    };
+  });
+
+  const teamAPlayers = players.filter(p => p.team === 'Tim A');
+  const teamBPlayers = players.filter(p => p.team === 'Tim B');
+
+  return {
+    videoName: selectedFile?.name || 'football_video.mp4',
+    duration: '3:45',
+    players,
+    teamStats: {
+      totalPlayers: players.length,
+      totalDist: +players.reduce((s,p)=>s+p.totalDist,0).toFixed(2),
+      topSpeed: +Math.max(...players.map(p=>p.topSpeed)).toFixed(1),
+      totalSprints: players.reduce((s,p)=>s+p.sprints,0),
+    }
+  };
+}
+
+// ── RENDER RESULTS ────────────────────────────────────
+function renderResults() {
+  const d = analysisData;
+  const rs = document.getElementById('resultsSection');
+
+  // Team stats
+  const ts = d.teamStats;
+  document.getElementById('teamStats').innerHTML = `
+    <div class="stat-card green">
+      <div class="stat-label">Total Pemain</div>
+      <div class="stat-value">${ts.totalPlayers}</div>
+      <div class="stat-sub">Terdeteksi & ditracking</div>
+    </div>
+    <div class="stat-card cyan">
+      <div class="stat-label">Total Jarak</div>
+      <div class="stat-value">${ts.totalDist}</div>
+      <div class="stat-sub">km seluruh pemain</div>
+    </div>
+    <div class="stat-card amber">
+      <div class="stat-label">Top Speed</div>
+      <div class="stat-value">${ts.topSpeed}</div>
+      <div class="stat-sub">km/h kecepatan tertinggi</div>
+    </div>
+    <div class="stat-card red">
+      <div class="stat-label">Total Sprint</div>
+      <div class="stat-value">${ts.totalSprints}</div>
+      <div class="stat-sub">sprint seluruh tim</div>
+    </div>
+  `;
+
+  // Player cards
+  const grid = document.getElementById('playersGrid');
+  grid.innerHTML = '';
+  const maxDist = Math.max(...d.players.map(p=>p.totalDist));
+
+  d.players.forEach(p => {
+    const ratingClass = p.rating >= 8 ? 'rating-high' : p.rating >= 6.5 ? 'rating-mid' : 'rating-low';
+    const distPct = (p.totalDist / maxDist * 100).toFixed(0);
+    const sprintPct = (p.sprintDist / p.totalDist * 100).toFixed(0);
+    const speedPct = ((p.topSpeed - 15) / 25 * 100).toFixed(0);
+
+    const card = document.createElement('div');
+    card.className = 'player-card';
+    card.onclick = () => openModal(p);
+    card.innerHTML = `
+      <div class="player-card-header" style="position:relative">
+        <div>
+          <div class="player-name">Pemain #${p.id} · ${p.position}</div>
+          <div class="player-pos" style="color:${p.teamColor}">${p.team}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="player-id-badge">ID:${p.trackId}</div>
+          <div class="rating-badge ${ratingClass}">${p.rating.toFixed(1)}</div>
+        </div>
+      </div>
+      <div class="player-card-body">
+        <div class="player-metrics">
+          <div class="metric-item">
+            <div class="metric-label">Jarak Total</div>
+            <div class="metric-value green">${p.totalDist} km</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-label">Top Speed</div>
+            <div class="metric-value amber">${p.topSpeed} km/h</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-label">Sprint Dist</div>
+            <div class="metric-value red">${p.sprintDist} km</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-label">Jumlah Sprint</div>
+            <div class="metric-value cyan">${p.sprints}x</div>
+          </div>
+        </div>
+        <div class="mini-bar-label"><span>Jarak</span><span>${p.totalDist}km</span></div>
+        <div class="mini-bar-track"><div class="mini-bar-fill fill-green" style="width:${distPct}%"></div></div>
+        <div class="mini-bar-label"><span>Sprint %</span><span>${sprintPct}%</span></div>
+        <div class="mini-bar-track"><div class="mini-bar-fill fill-red" style="width:${sprintPct}%"></div></div>
+        <div class="mini-bar-label"><span>Top Speed</span><span>${p.topSpeed}km/h</span></div>
+        <div class="mini-bar-track"><div class="mini-bar-fill fill-amber" style="width:${Math.min(speedPct,100)}%"></div></div>
+
+        <div class="mini-pitch-wrap">
+          <div class="mini-pitch">
+            <div class="pitch-line pitch-center-v"></div>
+            <div class="pitch-center-c"></div>
+            <div class="player-dot" style="left:${p.avgX/105*100}%;top:${p.avgY/68*100}%;background:${p.teamColor};box-shadow:0 0 8px ${p.teamColor}"></div>
+          </div>
+        </div>
+        <button class="btn-detail">Lihat Detail & Download PDF →</button>
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+
+  rs.classList.add('show');
+  rs.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── MODAL ─────────────────────────────────────────────
+function openModal(player) {
+  currentPlayer = player;
+  document.getElementById('modalTitle').textContent = `PEMAIN #${player.id} · ${player.position} · ${player.team}`;
+
+  // KPIs
+  document.getElementById('modalKpis').innerHTML = `
+    <div class="modal-kpi g"><div class="label">Jarak Total</div><div class="val">${player.totalDist} <span style="font-size:16px;font-family:'DM Sans'">km</span></div></div>
+    <div class="modal-kpi a"><div class="label">Top Speed</div><div class="val">${player.topSpeed} <span style="font-size:16px;font-family:'DM Sans'">km/h</span></div></div>
+    <div class="modal-kpi r"><div class="label">Sprint Distance</div><div class="val">${player.sprintDist} <span style="font-size:16px;font-family:'DM Sans'">km</span></div></div>
+    <div class="modal-kpi c"><div class="label">Jumlah Sprint</div><div class="val">${player.sprints} <span style="font-size:16px;font-family:'DM Sans'">kali</span></div></div>
+  `;
+
+  // Pitch
+  const pitchHtml = `
+    <div class="section-label" style="margin-bottom:10px">Posisi & Heatmap</div>
+    <div class="modal-pitch">
+      <div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(255,255,255,0.15)"></div>
+      <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:60px;height:60px;border-radius:50%;border:1px solid rgba(255,255,255,0.15)"></div>
+      <div class="heat-zone" style="left:${player.avgX/105*100}%;top:${player.avgY/68*100}%;width:120px;height:80px;opacity:0.7"></div>
+      <div class="heat-zone" style="left:${player.avgX/105*100}%;top:${player.avgY/68*100}%;width:70px;height:50px;opacity:0.5"></div>
+      <div class="modal-player-dot" style="left:${player.avgX/105*100}%;top:${player.avgY/68*100}%;background:${player.teamColor};box-shadow:0 0 20px ${player.teamColor}80"></div>
+    </div>
+  `;
+  document.getElementById('modalPitch').innerHTML = pitchHtml;
+
+  // Speed zones
+  const total = player.walk + player.jog + player.hiRun + player.sprintDist;
+  const zones = [
+    { label:'Walk', color:'#4CC9F0', val:player.walk, pct:(player.walk/total*100).toFixed(0) },
+    { label:'Jog',  color:'#80ED99', val:player.jog,  pct:(player.jog/total*100).toFixed(0) },
+    { label:'Hi-Run',color:'#FFD60A',val:player.hiRun,pct:(player.hiRun/total*100).toFixed(0) },
+    { label:'Sprint',color:'#FF4D6D',val:player.sprintDist,pct:(player.sprintDist/total*100).toFixed(0) },
+  ];
+  document.getElementById('modalSpeedZones').innerHTML = zones.map(z => `
+    <div class="zone">
+      <div class="zone-label">${z.label}</div>
+      <div class="zone-bar" style="background:${z.color}"></div>
+      <div class="zone-pct" style="color:${z.color}">${z.pct}%</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px">${z.val} km</div>
+    </div>
+  `).join('');
+
+  document.getElementById('modalOverlay').classList.add('show');
+}
+
+function closeModal(e) {
+  if (!e || e.target === document.getElementById('modalOverlay') || !e.target) {
+    document.getElementById('modalOverlay').classList.remove('show');
+  }
+}
+
+// ── PDF DOWNLOAD (simulasi) ───────────────────────────
+function downloadPlayerPDF() {
+  if (!currentPlayer) return;
+  generatePDFReport(currentPlayer);
+}
+
+function downloadAllPDF() {
+  if (!analysisData) return;
+  showToast('Menyiapkan ' + analysisData.players.length + ' PDF laporan...');
+  // Dalam implementasi nyata: zip semua PDF dari backend
+  setTimeout(() => {
+    analysisData.players.forEach((p, i) => {
+      setTimeout(() => generatePDFReport(p), i * 100);
+    });
+  }, 500);
+}
+
+function generatePDFReport(player) {
+  // Generate simple HTML-based PDF report
+  const html = `<!DOCTYPE html><html>
+  <head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: Arial, sans-serif; background: #080C12; color: #E8F0FE; margin: 0; padding: 32px; }
+    .header { background: #0A1628; padding: 24px; border-radius: 12px; border-bottom: 3px solid #00E676; margin-bottom: 24px; }
+    .header h1 { font-size: 32px; color: #00E676; margin: 0 0 4px; }
+    .header p { color: #5C7A9C; font-size: 14px; margin: 0; }
+    .kpis { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 24px; }
+    .kpi { background: #131B28; border-radius: 8px; padding: 16px; }
+    .kpi-label { font-size: 10px; color: #5C7A9C; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 6px; }
+    .kpi-val { font-size: 28px; font-weight: 700; }
+    .table { width: 100%; border-collapse: collapse; background: #131B28; border-radius: 8px; overflow: hidden; }
+    .table th { background: #0A1628; padding: 10px 14px; text-align: left; font-size: 12px; color: #5C7A9C; letter-spacing: 1px; text-transform: uppercase; }
+    .table td { padding: 10px 14px; border-bottom: 1px solid #1E2D42; font-size: 14px; }
+    .footer { margin-top: 24px; text-align: center; color: #5C7A9C; font-size: 12px; }
+  </style>
+  </head>
+  <body>
+  <div class="header">
+    <h1>PEMAIN #${player.id} — ${player.position}</h1>
+    <p>${player.team}  ·  Track ID: ${player.trackId}  ·  ScoutVision Football Analytics</p>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><div class="kpi-label">Jarak Total</div><div class="kpi-val" style="color:#00E676">${player.totalDist} km</div></div>
+    <div class="kpi"><div class="kpi-label">Sprint Dist</div><div class="kpi-val" style="color:#FF4D6D">${player.sprintDist} km</div></div>
+    <div class="kpi"><div class="kpi-label">Top Speed</div><div class="kpi-val" style="color:#FFD600">${player.topSpeed} km/h</div></div>
+    <div class="kpi"><div class="kpi-label">Jumlah Sprint</div><div class="kpi-val" style="color:#18FFFF">${player.sprints}x</div></div>
+  </div>
+  <table class="table">
+    <tr><th>Metrik</th><th>Nilai</th><th>Status</th></tr>
+    <tr><td>Total Jarak</td><td>${player.totalDist} km</td><td style="color:#00E676">${player.totalDist > 0.8 ? 'Sangat Aktif' : player.totalDist > 0.5 ? 'Aktif' : 'Kurang Aktif'}</td></tr>
+    <tr><td>Sprint Distance</td><td>${player.sprintDist} km</td><td>—</td></tr>
+    <tr><td>Jumlah Sprint</td><td>${player.sprints}x</td><td>—</td></tr>
+    <tr><td>Top Speed</td><td>${player.topSpeed} km/h</td><td style="color:#FFD600">${player.topSpeed > 30 ? 'Sangat Cepat' : player.topSpeed > 25 ? 'Cepat' : 'Normal'}</td></tr>
+    <tr><td>Posisi Rata-rata X</td><td>${player.avgX.toFixed(1)} m</td><td>${player.avgX > 52 ? 'Area Serang' : 'Area Bertahan'}</td></tr>
+    <tr><td>Posisi Rata-rata Y</td><td>${player.avgY.toFixed(1)} m</td><td>Koordinat Lapangan</td></tr>
+    <tr><td>Rating Kinerja</td><td>${player.rating}/10</td><td style="color:${player.rating>=8?'#00E676':player.rating>=6.5?'#FFD600':'#FF4D6D'}">${player.rating>=8?'Excellent':player.rating>=6.5?'Good':'Average'}</td></tr>
+  </table>
+  <div class="footer">Generated by ScoutVision Football Analytics  ·  ${new Date().toLocaleDateString('id-ID')}</div>
+  </body></html>`;
+
+  const blob = new Blob([html], { type: 'text/html' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `ScoutVision_Pemain_${player.id}_${player.position}.html`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast(`Laporan Pemain #${player.id} didownload!`);
+}
+
+// ── TOAST ─────────────────────────────────────────────
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  document.getElementById('toastMsg').textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+</script>
+</body>
+</html>
