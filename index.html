@@ -605,9 +605,14 @@
   <div class="results-section" id="resultsSection">
     <div class="results-header">
       <div class="results-title">HASIL <span>ANALISIS</span></div>
-      <button class="btn-download-all" onclick="downloadAllPDF()">
-        ↓ Download Semua PDF
-      </button>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="btn-download-all" onclick="downloadMatchReport()">
+          ↓ Match Report PDF
+        </button>
+        <button class="btn-download-all" style="background:var(--cyan)" onclick="downloadAllPDF()">
+          ↓ Download Semua PDF
+        </button>
+      </div>
     </div>
 
     <!-- Team Stats -->
@@ -648,6 +653,9 @@
 </div>
 
 <script>
+// ── API CONFIG ────────────────────────────────────────
+const API_BASE = 'RAILWAY_URL_PLACEHOLDER'; // updated after deploy
+
 // ── DATA ─────────────────────────────────────────────
 let selectedFile = null;
 let analysisData = null;
@@ -693,63 +701,115 @@ function handleFile(file) {
   uploadZone.style.display = 'none';
 }
 
-// ── ANALYSIS SIMULATION ──────────────────────────────
-function startAnalysis() {
-  document.getElementById('videoPreview').style.display = 'none';
-  document.getElementById('progressSection').classList.add('show');
-
+// ── ANALYSIS ─────────────────────────────────────────
+function simulateProgress(onDone) {
   const steps = ['step1','step2','step3','step4'];
   const durations = [2500, 2000, 1500, 2000];
   let stepIdx = 0;
   let totalTime = durations.reduce((a,b) => a+b, 0);
   let elapsed = 0;
 
-  // Activate first step
-  document.getElementById(steps[0]).classList.add('active');
+  if (document.getElementById(steps[0])) {
+    document.getElementById(steps[0]).classList.add('active');
+  }
 
   function nextStep() {
     if (stepIdx >= steps.length) {
-      finishAnalysis();
+      document.getElementById('progressBar').style.width = '100%';
+      document.getElementById('progressPct').textContent = '100%';
+      setTimeout(() => {
+        document.getElementById('progressSection').classList.remove('show');
+        if (onDone) onDone();
+      }, 600);
       return;
     }
     const dur = durations[stepIdx];
     const stepStart = elapsed;
-
     const interval = setInterval(() => {
       elapsed += 50;
       const pct = Math.min((elapsed / totalTime) * 100, 100);
       document.getElementById('progressBar').style.width = pct + '%';
       document.getElementById('progressPct').textContent = Math.round(pct) + '%';
     }, 50);
-
     setTimeout(() => {
       clearInterval(interval);
-      document.getElementById(steps[stepIdx]).classList.remove('active');
-      document.getElementById(steps[stepIdx]).classList.add('done');
-      document.getElementById(steps[stepIdx]).querySelector('.step-icon').textContent = '✓';
+      const el = document.getElementById(steps[stepIdx]);
+      if (el) {
+        el.classList.remove('active');
+        el.classList.add('done');
+        const icon = el.querySelector('.step-icon');
+        if (icon) icon.textContent = '✓';
+      }
       stepIdx++;
       elapsed = stepStart + dur;
-      if (stepIdx < steps.length) {
+      if (stepIdx < steps.length && document.getElementById(steps[stepIdx])) {
         document.getElementById(steps[stepIdx]).classList.add('active');
       }
       nextStep();
     }, dur);
   }
-
   nextStep();
 }
 
-function finishAnalysis() {
-  document.getElementById('spinner').style.display = 'none';
-  document.getElementById('progressBar').style.width = '100%';
-  document.getElementById('progressPct').textContent = '100%';
+async function startAnalysis() {
+  if (!selectedFile) return;
 
-  setTimeout(() => {
-    document.getElementById('progressSection').classList.remove('show');
-    analysisData = generateMockData();
-    renderResults();
-    showToast('Analisis selesai! ' + analysisData.players.length + ' pemain terdeteksi.');
-  }, 600);
+  document.getElementById('videoPreview').style.display = 'none';
+  document.getElementById('progressSection').classList.add('show');
+
+  const formData = new FormData();
+  formData.append('file', selectedFile);
+
+  let jobId;
+  try {
+    showToast('Mengupload video...');
+    const resp = await fetch(API_BASE + '/api/upload', { method: 'POST', body: formData });
+    const data = await resp.json();
+    jobId = data.jobId;
+  } catch(e) {
+    // Fall back to mock if API_BASE is placeholder or unreachable
+    if (API_BASE.includes('PLACEHOLDER') || API_BASE.includes('PLACEHOLDER')) {
+      simulateProgress(() => { analysisData = generateMockData(); renderResults();
+        showToast('Demo: ' + analysisData.players.length + ' pemain terdeteksi (mock data).'); });
+      return;
+    }
+    showToast('Error: ' + e.message); return;
+  }
+
+  // Poll status
+  const stepMap = { upload: 0, extract: 1, detect: 2, track: 3, stats: 4, pdf: 5, done: 5 };
+  const stepIds = ['step1','step2','step3','step4'];
+
+  const pollInterval = setInterval(async () => {
+    try {
+      const s = await (await fetch(API_BASE + '/api/status/' + jobId)).json();
+      document.getElementById('progressBar').style.width = s.progress + '%';
+      document.getElementById('progressPct').textContent = s.progress + '%';
+
+      const stepIdx = Math.min(stepMap[s.step] || 0, stepIds.length - 1);
+      stepIds.forEach((id, i) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (i < stepIdx) { el.className = 'step done'; const ic = el.querySelector('.step-icon'); if(ic) ic.textContent='✓'; }
+        else if (i === stepIdx) el.className = 'step active';
+        else el.className = 'step';
+      });
+
+      if (s.status === 'done') {
+        clearInterval(pollInterval);
+        const results = await (await fetch(API_BASE + '/api/results/' + jobId)).json();
+        results._jobId = jobId;
+        analysisData = results;
+        document.getElementById('progressSection').classList.remove('show');
+        renderResults();
+        showToast('Analisis selesai! ' + results.players.length + ' pemain terdeteksi.');
+      } else if (s.status === 'error') {
+        clearInterval(pollInterval);
+        showToast('Error: ' + s.message);
+        document.getElementById('progressSection').classList.remove('show');
+      }
+    } catch(e) { console.error(e); }
+  }, 3000);
 }
 
 // ── MOCK DATA ─────────────────────────────────────────
@@ -890,6 +950,19 @@ function renderResults() {
         <button class="btn-detail">Lihat Detail & Download PDF →</button>
       </div>
     `;
+    // Wire up PDF download button
+    const dlBtn = card.querySelector('.btn-detail');
+    if (dlBtn) {
+      dlBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (analysisData && analysisData._jobId && !API_BASE.includes('PLACEHOLDER')) {
+          window.open(API_BASE + '/api/report/' + analysisData._jobId + '/player/' + p.id);
+        } else {
+          openModal(p);
+        }
+      };
+    }
+
     grid.appendChild(card);
   });
 
@@ -949,21 +1022,40 @@ function closeModal(e) {
   }
 }
 
-// ── PDF DOWNLOAD (simulasi) ───────────────────────────
+// ── PDF DOWNLOAD ──────────────────────────────────────
+function downloadMatchReport() {
+  if (!analysisData) return;
+  if (analysisData._jobId && !API_BASE.includes('PLACEHOLDER')) {
+    window.open(API_BASE + '/api/report/' + analysisData._jobId + '/match');
+  } else {
+    showToast('Match PDF tersedia setelah backend terhubung.');
+  }
+}
+
 function downloadPlayerPDF() {
   if (!currentPlayer) return;
-  generatePDFReport(currentPlayer);
+  if (analysisData && analysisData._jobId && !API_BASE.includes('PLACEHOLDER')) {
+    window.open(API_BASE + '/api/report/' + analysisData._jobId + '/player/' + currentPlayer.id);
+  } else {
+    generatePDFReport(currentPlayer);
+  }
 }
 
 function downloadAllPDF() {
   if (!analysisData) return;
-  showToast('Menyiapkan ' + analysisData.players.length + ' PDF laporan...');
-  // Dalam implementasi nyata: zip semua PDF dari backend
-  setTimeout(() => {
+  if (analysisData._jobId && !API_BASE.includes('PLACEHOLDER')) {
+    showToast('Membuka ' + analysisData.players.length + ' PDF laporan...');
     analysisData.players.forEach((p, i) => {
-      setTimeout(() => generatePDFReport(p), i * 100);
+      setTimeout(() => window.open(API_BASE + '/api/report/' + analysisData._jobId + '/player/' + p.id), i * 400);
     });
-  }, 500);
+  } else {
+    showToast('Menyiapkan ' + analysisData.players.length + ' PDF laporan...');
+    setTimeout(() => {
+      analysisData.players.forEach((p, i) => {
+        setTimeout(() => generatePDFReport(p), i * 100);
+      });
+    }, 500);
+  }
 }
 
 function generatePDFReport(player) {
