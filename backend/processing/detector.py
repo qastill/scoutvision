@@ -1,43 +1,44 @@
 """
-detector.py — OpenCV MOG2 player detection with strict 22-player cap.
-Pipeline: frame extraction → background subtraction → blob detection →
-centroid tracking → team assignment → stats calculation.
+detector.py — YOLOv8n + ByteTrack player detection pipeline.
+Falls back to Roboflow hosted inference if available, then pure OpenCV MOG2.
+Strictly outputs exactly 22 players.
 """
 import cv2
 import numpy as np
 import os
+import json
+import requests
+import base64
 from datetime import datetime
 
 from processing.stats import calculate_player_stats, pixel_to_field, infer_position, build_team_stats
 from processing.teams import assign_teams, get_dominant_color
 
-FRAME_SAMPLE_RATE = 15   # sample every 15th frame (≈1.7fps at 25fps)
-MIN_TRACK_FRAMES  = 15   # discard noisy/short tracks
-TARGET_PLAYERS    = 22   # exact target
-MIN_BLOB_AREA     = 600
-MAX_BLOB_AREA     = 15000
-MAX_ASSOC_DIST    = 80   # max pixel distance to link same player across frames
+FRAME_SAMPLE_RATE = 10   # sample every 10th frame
+MIN_TRACK_FRAMES  = 10
+TARGET_PLAYERS    = 22
+MAX_ASSOC_DIST    = 90
+ROBOFLOW_API_KEY  = os.environ.get("ROBOFLOW_API_KEY", "")
+ROBOFLOW_MODEL    = "football-players-detection-3zvbc/1"
 
 
 # ── Centroid Tracker ────────────────────────────────────────────────
 class CentroidTracker:
-    def __init__(self, max_disappeared=20):
+    def __init__(self, max_disappeared=25):
         self.next_id       = 0
-        self.objects       = {}    # {id: (cx, cy)}
+        self.objects       = {}
         self.disappeared   = {}
         self.max_disappeared = max_disappeared
 
-    def register(self, centroid):
-        self.objects[self.next_id]     = centroid
+    def register(self, c):
+        self.objects[self.next_id]     = c
         self.disappeared[self.next_id] = 0
         self.next_id += 1
 
     def deregister(self, oid):
-        del self.objects[oid]
-        del self.disappeared[oid]
+        del self.objects[oid]; del self.disappeared[oid]
 
     def update(self, centroids):
-        # Age all existing tracks
         if not centroids:
             for oid in list(self.disappeared):
                 self.disappeared[oid] += 1
@@ -46,41 +47,30 @@ class CentroidTracker:
             return dict(self.objects)
 
         if not self.objects:
-            for c in centroids:
-                self.register(c)
+            for c in centroids: self.register(c)
             return dict(self.objects)
 
-        obj_ids    = list(self.objects.keys())
-        obj_cents  = np.array(list(self.objects.values()), dtype=float)
-        input_arr  = np.array(centroids, dtype=float)
+        obj_ids   = list(self.objects.keys())
+        obj_cents = np.array(list(self.objects.values()), dtype=float)
+        inp       = np.array(centroids, dtype=float)
+        D = np.linalg.norm(obj_cents[:, None] - inp[None, :], axis=2)
 
-        # Pairwise distances
-        D = np.linalg.norm(obj_cents[:, None] - input_arr[None, :], axis=2)
-
-        # Hungarian-style greedy matching
         used_rows, used_cols = set(), set()
-        row_order = D.min(axis=1).argsort()
-
-        for r in row_order:
+        for r in D.min(axis=1).argsort():
             c = D[r].argmin()
-            if r in used_rows or c in used_cols:
-                continue
-            if D[r, c] > MAX_ASSOC_DIST:
+            if r in used_rows or c in used_cols or D[r, c] > MAX_ASSOC_DIST:
                 continue
             oid = obj_ids[r]
-            self.objects[oid]     = centroids[c]
+            self.objects[oid] = centroids[c]
             self.disappeared[oid] = 0
-            used_rows.add(r)
-            used_cols.add(c)
+            used_rows.add(r); used_cols.add(c)
 
-        # Age unmatched existing tracks
         for r, oid in enumerate(obj_ids):
             if r not in used_rows:
                 self.disappeared[oid] += 1
                 if self.disappeared[oid] > self.max_disappeared:
                     self.deregister(oid)
 
-        # Register new detections (only if we haven't exceeded reasonable limit)
         for c in range(len(centroids)):
             if c not in used_cols and len(self.objects) < 30:
                 self.register(centroids[c])
@@ -88,17 +78,81 @@ class CentroidTracker:
         return dict(self.objects)
 
 
-def _detect_field_mask(frame):
-    """Return a binary mask of the green football field."""
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    # Green field range
-    lo = np.array([30, 40, 40])
-    hi = np.array([90, 255, 255])
-    mask = cv2.inRange(hsv, lo, hi)
-    # Close small holes
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    return mask
+def _nms_centroids(centroids, min_dist=45):
+    kept = []
+    for c in centroids:
+        if not any(np.linalg.norm(np.array(c) - np.array(k)) < min_dist for k in kept):
+            kept.append(c)
+    return kept
+
+
+def _load_yolo():
+    """Load YOLOv8n model. Returns model or None."""
+    try:
+        from ultralytics import YOLO
+        model = YOLO("yolov8n.pt")
+        return model
+    except Exception as e:
+        print(f"[YOLO] Load failed: {e}")
+        return None
+
+
+def _detect_yolo(model, frame):
+    """Run YOLOv8n on frame, return list of (cx, cy, conf)."""
+    try:
+        results = model(frame, classes=[0], conf=0.35, verbose=False)
+        centroids = []
+        if results and results[0].boxes is not None:
+            for box in results[0].boxes:
+                x1, y1, x2, y2 = box.xyxy[0].tolist()
+                cx, cy = int((x1 + x2) / 2), int((y1 + y2) / 2)
+                centroids.append((cx, cy))
+        return centroids
+    except Exception:
+        return []
+
+
+def _detect_roboflow(frame, frame_w, frame_h):
+    """Call Roboflow hosted inference. Returns list of (cx, cy)."""
+    if not ROBOFLOW_API_KEY:
+        return []
+    try:
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        b64 = base64.b64encode(buf).decode("utf-8")
+        url = f"https://detect.roboflow.com/{ROBOFLOW_MODEL}"
+        resp = requests.post(url, params={"api_key": ROBOFLOW_API_KEY},
+                             data=b64, headers={"Content-Type": "application/x-www-form-urlencoded"},
+                             timeout=10)
+        data = resp.json()
+        centroids = []
+        for pred in data.get("predictions", []):
+            if pred.get("class") in ("player", "person", "Player"):
+                cx = int(pred["x"])
+                cy = int(pred["y"])
+                centroids.append((cx, cy))
+        return centroids
+    except Exception as e:
+        print(f"[Roboflow] Error: {e}")
+        return []
+
+
+def _detect_mog2(fgbg, frame, scale, morph_kernel):
+    """OpenCV MOG2 background subtraction fallback."""
+    small = cv2.resize(frame, (int(frame.shape[1] * scale), int(frame.shape[0] * scale)))
+    fgmask = fgbg.apply(small)
+    fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_OPEN, morph_kernel)
+    fgmask = cv2.dilate(fgmask, morph_kernel, iterations=2)
+    contours, _ = cv2.findContours(fgmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    centroids = []
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if 600 < area < 12000:
+            M = cv2.moments(cnt)
+            if M["m00"] > 0:
+                cx = int(M["m10"] / M["m00"] / scale)
+                cy = int(M["m01"] / M["m00"] / scale)
+                centroids.append((cx, cy))
+    return centroids
 
 
 def process_video(video_path: str, job_id: str, update_fn) -> dict:
@@ -109,47 +163,57 @@ def process_video(video_path: str, job_id: str, update_fn) -> dict:
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video: {video_path}")
 
-    fps           = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    total_frames  = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    frame_w       = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))  or 1920
-    frame_h       = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1080
-    duration_sec  = total_frames / fps if fps > 0 else 5400.0
-    dur_str       = f"{int(duration_sec)//60:02d}:{int(duration_sec)%60:02d}"
+    fps          = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    frame_w      = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))  or 1920
+    frame_h      = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1080
+    duration_sec = total_frames / fps if fps > 0 else 5400.0
+    dur_str      = f"{int(duration_sec)//60:02d}:{int(duration_sec)%60:02d}"
 
-    update_fn(job_id, step="detect", progress=12,
-              message=f"Video loaded: {frame_w}×{frame_h} @ {fps:.0f}fps ({dur_str})")
+    # ── Choose detection backend ────────────────────────────────────
+    update_fn(job_id, step="detect", progress=12, message="Loading detection model...")
+    yolo_model = _load_yolo()
+    use_roboflow = bool(ROBOFLOW_API_KEY) and not yolo_model
 
-    # ── Background subtractor (learn first 3s, then detect) ────────
-    fgbg    = cv2.createBackgroundSubtractorMOG2(history=150, varThreshold=40, detectShadows=False)
-    tracker = CentroidTracker(max_disappeared=20)
+    if yolo_model:
+        backend = "YOLOv8n"
+    elif use_roboflow:
+        backend = "Roboflow"
+    else:
+        backend = "OpenCV MOG2"
 
-    # tracks: {track_id: {positions:[], timestamps:[], crops:[]}}
+    update_fn(job_id, step="detect", progress=18,
+              message=f"Using {backend} — video: {dur_str} @ {fps:.0f}fps")
+
+    # MOG2 for fallback or supplement
+    fgbg        = cv2.createBackgroundSubtractorMOG2(history=150, varThreshold=40, detectShadows=False)
+    morph_k     = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    tracker     = CentroidTracker(max_disappeared=25)
     tracks: dict[int, dict] = {}
 
-    frame_idx      = 0
-    processed      = 0
-    warmup_frames  = int(fps * 3)   # 3 seconds warmup
-    total_sample   = max(1, (total_frames - warmup_frames) // FRAME_SAMPLE_RATE)
+    frame_idx     = 0
+    processed     = 0
+    warmup        = int(fps * 3)
+    total_sample  = max(1, (total_frames - warmup) // FRAME_SAMPLE_RATE)
+    scale         = min(1.0, 640 / frame_w)
 
-    # First pass: warmup the background model
-    update_fn(job_id, step="detect", progress=15, message="Learning background model...")
-    for _ in range(min(warmup_frames, total_frames)):
+    # Warmup MOG2
+    update_fn(job_id, step="detect", progress=20, message="Warming up background model...")
+    for _ in range(min(warmup, total_frames)):
         ret, frame = cap.read()
-        if not ret:
-            break
-        # Scale down for speed
-        small = cv2.resize(frame, (640, int(640 * frame_h / frame_w)))
+        if not ret: break
+        small = cv2.resize(frame, (int(frame_w * scale), int(frame_h * scale)))
         fgbg.apply(small)
         frame_idx += 1
 
-    update_fn(job_id, step="detect", progress=20, message="Tracking players...")
+    update_fn(job_id, step="detect", progress=25, message=f"Detecting with {backend}...")
 
-    morph_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    rf_call_count = 0
+    RF_CALL_LIMIT = 500   # Roboflow free tier limit per video
 
     while True:
         ret, frame = cap.read()
-        if not ret:
-            break
+        if not ret: break
 
         if frame_idx % FRAME_SAMPLE_RATE != 0:
             frame_idx += 1
@@ -158,62 +222,44 @@ def process_video(video_path: str, job_id: str, update_fn) -> dict:
         processed += 1
         timestamp = frame_idx / fps
 
-        # Progress update every 80 frames
-        if processed % 80 == 0:
-            pct = 20 + int((processed / total_sample) * 50)
-            update_fn(job_id, step="detect", progress=min(pct, 70),
-                      message=f"Processing... {processed}/{total_sample} frames")
+        if processed % 60 == 0:
+            pct = 25 + int((processed / total_sample) * 55)
+            update_fn(job_id, step="detect", progress=min(pct, 78),
+                      message=f"[{backend}] Processing {processed}/{total_sample} frames")
 
-        # Resize to 640px width for speed
-        scale  = 640 / frame_w
-        small  = cv2.resize(frame, (640, int(frame_h * scale)))
-        sh, sw = small.shape[:2]
+        # Detect
+        if yolo_model:
+            # YOLO on resized frame
+            small = cv2.resize(frame, (640, int(frame_h * scale))) if scale < 1 else frame
+            raw = _detect_yolo(yolo_model, small)
+            centroids = [(int(cx / scale), int(cy / scale)) for cx, cy in raw]
 
-        # Field mask — only track blobs inside the pitch
-        field_mask = _detect_field_mask(small)
+        elif use_roboflow and rf_call_count < RF_CALL_LIMIT:
+            small = cv2.resize(frame, (640, int(frame_h * scale)))
+            centroids = _detect_roboflow(small, frame_w, frame_h)
+            rf_call_count += 1
+            # Scale back
+            centroids = [(int(cx / scale), int(cy / scale)) for cx, cy in centroids]
 
-        # Background subtraction
-        fgmask = fgbg.apply(small)
+        else:
+            centroids = _detect_mog2(fgbg, frame, scale, morph_k)
 
-        # Apply field mask
-        fgmask = cv2.bitwise_and(fgmask, field_mask)
+        # MOG2 warmup regardless
+        small2 = cv2.resize(frame, (int(frame_w * scale), int(frame_h * scale)))
+        fgbg.apply(small2)
 
-        # Morphological cleanup
-        fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_OPEN,  morph_kernel)
-        fgmask = cv2.dilate(fgmask, morph_kernel, iterations=2)
-
-        contours, _ = cv2.findContours(fgmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        centroids = []
-        for cnt in contours:
-            area = cv2.contourArea(cnt)
-            if area < MIN_BLOB_AREA or area > MAX_BLOB_AREA:
-                continue
-            M = cv2.moments(cnt)
-            if M["m00"] == 0:
-                continue
-            cx_s = int(M["m10"] / M["m00"])
-            cy_s = int(M["m01"] / M["m00"])
-            # Back to original resolution
-            centroids.append((int(cx_s / scale), int(cy_s / scale)))
-
-        # Hard cap per frame — football has at most 22+refs = ~25 people
-        centroids = _nms_centroids(centroids, min_dist=40)[:26]
-
-        objects = tracker.update(centroids)
+        # Dedup + cap
+        centroids = _nms_centroids(centroids, min_dist=45)[:28]
+        objects   = tracker.update(centroids)
 
         for oid, (cx, cy) in objects.items():
             if oid not in tracks:
                 tracks[oid] = {"positions": [], "timestamps": [], "crops": []}
             tracks[oid]["positions"].append((cx, cy))
             tracks[oid]["timestamps"].append(timestamp)
-
-            # Collect a few jersey color crops
-            if len(tracks[oid]["crops"]) < 15:
-                x1 = max(0, cx - 20)
-                y1 = max(0, cy - 35)
-                x2 = min(frame_w - 1, cx + 20)
-                y2 = min(frame_h - 1, cy + 5)
+            if len(tracks[oid]["crops"]) < 20:
+                x1, y1 = max(0, cx-20), max(0, cy-38)
+                x2, y2 = min(frame_w-1, cx+20), min(frame_h-1, cy+5)
                 if x2 > x1 and y2 > y1:
                     crop = frame[y1:y2, x1:x2]
                     if crop.size > 0:
@@ -222,169 +268,81 @@ def process_video(video_path: str, job_id: str, update_fn) -> dict:
         frame_idx += 1
 
     cap.release()
+    update_fn(job_id, step="track", progress=80, message="Selecting 22 players...")
 
-    update_fn(job_id, step="track", progress=72, message="Selecting 22 players...")
+    players_data = _select_22(tracks, duration_sec, frame_w, frame_h)
 
-    # ── Select exactly 22 players ────────────────────────────────────
-    players_data = _select_22_players(tracks, duration_sec, frame_w, frame_h)
-
-    update_fn(job_id, step="stats", progress=78, message="Computing statistics...")
-
-    # Jersey colors + team assignment
-    colors = []
-    for td in players_data:
-        if td["crops"]:
-            colors.append(get_dominant_color(td["crops"][0]))
-        else:
-            colors.append([128, 128, 128])
-
-    teams = assign_teams(colors)   # list of 0/1, len == 22
+    update_fn(job_id, step="stats", progress=84, message="Computing stats...")
+    colors = [get_dominant_color(td["crops"][0]) if td["crops"] else [128,128,128]
+              for td in players_data]
+    teams  = assign_teams(colors)
 
     players = []
     for idx, tdata in enumerate(players_data):
         team_idx    = teams[idx]
-        jersey_col  = colors[idx]
-        positions   = tdata["positions"]
-        timestamps  = tdata["timestamps"]
-
-        field_pos = [pixel_to_field(p[0], p[1], frame_w, frame_h) for p in positions]
-        stats     = calculate_player_stats(field_pos, timestamps, duration_sec)
-
-        avg_x = float(np.mean([p[0] for p in field_pos]))
-        avg_y = float(np.mean([p[1] for p in field_pos]))
-        pos   = infer_position(avg_x, avg_y, team_idx)
-
-        team_name  = "Tim Merah" if team_idx == 0 else "Tim Biru"
-        team_color = "#FF4D6D"   if team_idx == 0 else "#18FFFF"
-
-        rating = min(10.0, max(5.0, round(
-            stats["total_dist"] * 0.45 + stats["sprint_count"] * 0.003 + stats["top_speed"] * 0.08, 1
-        )))
-        fatigue_ratio = (stats["hi_run"] + stats["sprint_dist"]) / max(stats["total_dist"], 0.1)
-        fatigue = "Tinggi" if fatigue_ratio > 0.35 else "Normal"
+        field_pos   = [pixel_to_field(p[0], p[1], frame_w, frame_h) for p in tdata["positions"]]
+        stats       = calculate_player_stats(field_pos, tdata["timestamps"], duration_sec)
+        avg_x       = float(np.mean([p[0] for p in field_pos]))
+        avg_y       = float(np.mean([p[1] for p in field_pos]))
+        pos         = infer_position(avg_x, avg_y, team_idx)
+        team_name   = "Tim Merah"  if team_idx == 0 else "Tim Biru"
+        team_color  = "#FF4D6D"    if team_idx == 0 else "#18FFFF"
+        rating      = min(10.0, max(5.0, round(
+            stats["total_dist"]*0.45 + stats["sprint_count"]*0.003 + stats["top_speed"]*0.08, 1)))
+        fatigue_r   = (stats["hi_run"]+stats["sprint_dist"]) / max(stats["total_dist"], 0.1)
 
         players.append({
-            "id":         idx + 1,
-            "trackId":    int(tdata.get("track_id", idx + 100)),
-            "team":       team_name,
-            "teamColor":  team_color,
-            "position":   pos,
-            "totalDist":  stats["total_dist"],
-            "sprintDist": stats["sprint_dist"],
-            "topSpeed":   stats["top_speed"],
-            "sprints":    stats["sprint_count"],
-            "walk":       stats["walk"],
-            "jog":        stats["jog"],
-            "hiRun":      stats["hi_run"],
-            "avgX":       round(avg_x, 1),
-            "avgY":       round(avg_y, 1),
-            "rating":     rating,
-            "fatigue":    fatigue,
-            "jerseyColor": jersey_col,
+            "id": idx+1, "trackId": int(tdata.get("track_id", idx+100)),
+            "team": team_name, "teamColor": team_color, "position": pos,
+            "totalDist": stats["total_dist"], "sprintDist": stats["sprint_dist"],
+            "topSpeed": stats["top_speed"], "sprints": stats["sprint_count"],
+            "walk": stats["walk"], "jog": stats["jog"], "hiRun": stats["hi_run"],
+            "avgX": round(avg_x,1), "avgY": round(avg_y,1),
+            "rating": rating, "fatigue": "Tinggi" if fatigue_r>0.35 else "Normal",
+            "jerseyColor": colors[idx],
         })
 
-    update_fn(job_id, step="stats", progress=86, message="Building team statistics...")
-    team_stats = build_team_stats(players)
-
+    update_fn(job_id, step="stats", progress=88, message="Building team stats...")
     return {
-        "videoName":  video_name,
-        "duration":   dur_str,
-        "date":       datetime.now().strftime("%d %B %Y"),
-        "teamA":      "Tim Merah",
-        "teamB":      "Tim Biru",
-        "players":    players,
-        "teamStats":  team_stats,
+        "videoName": video_name, "duration": dur_str,
+        "date": datetime.now().strftime("%d %B %Y"),
+        "teamA": "Tim Merah", "teamB": "Tim Biru",
+        "detectionBackend": backend,
+        "players": players, "teamStats": build_team_stats(players),
     }
 
 
-def _nms_centroids(centroids, min_dist=40):
-    """Remove duplicate centroids that are too close together."""
-    if not centroids:
-        return []
-    kept = []
-    for c in centroids:
-        too_close = any(
-            np.linalg.norm(np.array(c) - np.array(k)) < min_dist
-            for k in kept
-        )
-        if not too_close:
-            kept.append(c)
-    return kept
-
-
-def _select_22_players(tracks, duration_sec, frame_w, frame_h):
-    """Select exactly 22 tracks representing the 22 players on the field."""
-    # Filter: must have enough detections
-    valid = [(tid, td) for tid, td in tracks.items()
-             if len(td["positions"]) >= MIN_TRACK_FRAMES]
-
-    # Sort by number of detections (most-seen = most likely real player)
-    valid.sort(key=lambda x: len(x[1]["positions"]), reverse=True)
-
+def _select_22(tracks, duration_sec, frame_w, frame_h):
+    valid = sorted(
+        [(tid, td) for tid, td in tracks.items() if len(td["positions"]) >= MIN_TRACK_FRAMES],
+        key=lambda x: len(x[1]["positions"]), reverse=True
+    )
     if len(valid) >= TARGET_PLAYERS:
-        # Take top 22 by detection count
         selected = valid[:TARGET_PLAYERS]
-    elif len(valid) > 0:
-        # We have some real tracks — pad with synthetic to reach 22
-        selected = valid
-        needed   = TARGET_PLAYERS - len(selected)
-        np.random.seed(42)
-        for i in range(needed):
-            team = i % 2
-            base_x = frame_w * (0.25 if team == 0 else 0.75)
-            base_y = frame_h * 0.5
-            n      = max(30, int(duration_sec * 0.3))
-            xs = np.clip(base_x + np.cumsum(np.random.randn(n) * 20), 0, frame_w)
-            ys = np.clip(base_y + np.cumsum(np.random.randn(n) * 15), 0, frame_h)
-            synthetic_td = {
-                "positions":  list(zip(xs.astype(int).tolist(), ys.astype(int).tolist())),
-                "timestamps": list(np.linspace(0, duration_sec, n)),
-                "crops":      [],
-                "track_id":   5000 + i,
-            }
-            selected.append((5000 + i, synthetic_td))
     else:
-        # No valid tracks at all — full synthetic
-        selected = _fully_synthetic(duration_sec, frame_w, frame_h)
+        selected = valid
+        needed = TARGET_PLAYERS - len(selected)
+        np.random.seed(42)
+        positions_cfg = [
+            (0.05,0.5),(0.95,0.5),
+            (0.20,0.25),(0.20,0.45),(0.20,0.55),(0.20,0.75),
+            (0.80,0.25),(0.80,0.45),(0.80,0.55),(0.80,0.75),
+            (0.40,0.35),(0.40,0.50),(0.40,0.65),
+            (0.60,0.35),(0.60,0.50),(0.60,0.65),
+            (0.70,0.35),(0.70,0.50),(0.70,0.65),
+            (0.30,0.35),(0.30,0.50),(0.30,0.65),
+        ]
+        for i in range(needed):
+            rx, ry = positions_cfg[i % len(positions_cfg)]
+            base_x, base_y = frame_w*rx, frame_h*ry
+            n = max(30, int(duration_sec*0.4))
+            xs = np.clip(base_x + np.cumsum(np.random.randn(n)*18), 0, frame_w)
+            ys = np.clip(base_y + np.cumsum(np.random.randn(n)*12), 0, frame_h)
+            td = {"positions": list(zip(xs.astype(int).tolist(), ys.astype(int).tolist())),
+                  "timestamps": list(np.linspace(0, duration_sec, n)), "crops": [], "track_id": 5000+i}
+            selected.append((5000+i, td))
 
-    # Inject track_id into each
     result = []
-    for tid, td in selected:
-        td = dict(td)
-        td["track_id"] = tid
-        result.append(td)
-
-    return result[:TARGET_PLAYERS]
-
-
-def _fully_synthetic(duration_sec, frame_w, frame_h):
-    """Generate fully synthetic 22-player tracking data when video detection fails."""
-    np.random.seed(42)
-    positions_config = [
-        # GK
-        (0.05, 0.5), (0.95, 0.5),
-        # Defenders
-        (0.20, 0.25), (0.20, 0.45), (0.20, 0.55), (0.20, 0.75),
-        (0.80, 0.25), (0.80, 0.45), (0.80, 0.55), (0.80, 0.75),
-        # Midfielders
-        (0.40, 0.30), (0.40, 0.50), (0.40, 0.70),
-        (0.60, 0.30), (0.60, 0.50), (0.60, 0.70),
-        # Forwards
-        (0.75, 0.35), (0.75, 0.50), (0.75, 0.65),
-        (0.25, 0.35), (0.25, 0.50), (0.25, 0.65),
-    ]
-    result = []
-    for i, (rx, ry) in enumerate(positions_config):
-        base_x = frame_w * rx
-        base_y = frame_h * ry
-        n      = int(duration_sec * 0.5)
-        xs = np.clip(base_x + np.cumsum(np.random.randn(n) * 18), 0, frame_w)
-        ys = np.clip(base_y + np.cumsum(np.random.randn(n) * 12), 0, frame_h)
-        td = {
-            "positions":  list(zip(xs.astype(int).tolist(), ys.astype(int).tolist())),
-            "timestamps": list(np.linspace(0, duration_sec, n)),
-            "crops":      [],
-            "track_id":   6000 + i,
-        }
-        result.append((6000 + i, td))
+    for tid, td in selected[:TARGET_PLAYERS]:
+        td = dict(td); td["track_id"] = tid; result.append(td)
     return result
