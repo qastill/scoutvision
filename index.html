@@ -1108,7 +1108,39 @@ function removePhoto(pid) {
 
 async function skipRoster() {
   if (!currentJobId) return;
-  await _postRosterAndPoll(new FormData());
+  document.getElementById('rosterSection').classList.remove('show');
+  document.getElementById('progressSection').classList.add('show');
+  document.getElementById('progressBar').style.width = '90%';
+  document.getElementById('progressPct').textContent = '90%';
+  try {
+    const resp = await fetch(API_BASE + '/api/roster/' + currentJobId + '/skip', { method: 'POST' });
+    if (!resp.ok) throw new Error('Skip failed: ' + resp.status);
+  } catch(e) {
+    showToast('Error: ' + e.message);
+    document.getElementById('progressSection').classList.remove('show');
+    return;
+  }
+  // Poll until done
+  const doneInterval = setInterval(async () => {
+    try {
+      const s = await (await fetch(API_BASE + '/api/status/' + currentJobId)).json();
+      document.getElementById('progressBar').style.width = s.progress + '%';
+      document.getElementById('progressPct').textContent = s.progress + '%';
+      if (s.status === 'done') {
+        clearInterval(doneInterval);
+        const results = await (await fetch(API_BASE + '/api/results/' + currentJobId)).json();
+        results._jobId = currentJobId;
+        analysisData = results;
+        document.getElementById('progressSection').classList.remove('show');
+        renderResults();
+        showToast('Laporan siap! ' + results.players.length + ' pemain terdeteksi.');
+      } else if (s.status === 'error') {
+        clearInterval(doneInterval);
+        showToast('Error: ' + s.message);
+        document.getElementById('progressSection').classList.remove('show');
+      }
+    } catch(e) { console.error(e); }
+  }, 2500);
 }
 
 async function submitRoster() {

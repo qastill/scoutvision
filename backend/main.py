@@ -194,6 +194,19 @@ async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = Fil
     return {"jobId": job_id, "status": "queued"}
 
 
+@app.post("/api/roster/{job_id}/skip")
+@app.get("/api/roster/{job_id}/skip")
+async def skip_roster(job_id: str, background_tasks: BackgroundTasks):
+    """Skip roster input and generate PDFs immediately — no body required."""
+    if job_id not in jobs:
+        raise HTTPException(404, "Job not found")
+    if jobs[job_id]["status"] not in ("processed",):
+        raise HTTPException(400, f"Job not ready: {jobs[job_id]['status']}")
+    jobs[job_id]["roster"] = {}
+    background_tasks.add_task(generate_pdfs, job_id)
+    return {"status": "generating", "jobId": job_id}
+
+
 @app.post("/api/roster/{job_id}")
 async def submit_roster(job_id: str, background_tasks: BackgroundTasks, request: Request):
     """Accept roster data (names, numbers, photos) and trigger PDF generation."""
