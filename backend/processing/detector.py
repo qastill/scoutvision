@@ -273,42 +273,60 @@ def process_video(video_path: str, job_id: str, update_fn) -> dict:
     players_data = _select_22(tracks, duration_sec, frame_w, frame_h)
 
     update_fn(job_id, step="stats", progress=84, message="Computing stats...")
-    colors = [get_dominant_color(td["crops"][0]) if td["crops"] else [128,128,128]
-              for td in players_data]
-    teams  = assign_teams(colors)
 
+    # ── Step 1: build partial player dicts for assign_teams ────────
+    partial = []
+    for idx, tdata in enumerate(players_data):
+        color = get_dominant_color(tdata["crops"][0]) if tdata["crops"] else [128, 128, 128]
+        partial.append({"id": idx + 1, "jerseyColor": color})
+
+    # assign_teams expects list[dict] with "jerseyColor", returns (players, teamA, teamB)
+    partial, teamA_name, teamB_name = assign_teams(partial)
+    team_map = {p["id"]: (p["team"], p["teamColor"]) for p in partial}
+
+    # ── Step 2: compute per-player stats ───────────────────────────
     players = []
     for idx, tdata in enumerate(players_data):
-        team_idx    = teams[idx]
-        field_pos   = [pixel_to_field(p[0], p[1], frame_w, frame_h) for p in tdata["positions"]]
-        stats       = calculate_player_stats(field_pos, tdata["timestamps"], duration_sec)
-        avg_x       = float(np.mean([p[0] for p in field_pos]))
-        avg_y       = float(np.mean([p[1] for p in field_pos]))
-        pos         = infer_position(avg_x, avg_y, team_idx)
-        team_name   = "Tim Merah"  if team_idx == 0 else "Tim Biru"
-        team_color  = "#FF4D6D"    if team_idx == 0 else "#18FFFF"
-        rating      = min(10.0, max(5.0, round(
-            stats["total_dist"]*0.45 + stats["sprint_count"]*0.003 + stats["top_speed"]*0.08, 1)))
-        fatigue_r   = (stats["hi_run"]+stats["sprint_dist"]) / max(stats["total_dist"], 0.1)
+        # Convert pixel positions to (frame_idx, field_x, field_y) for stats.py
+        field_positions = []
+        for fi, (px, py) in enumerate(tdata["positions"]):
+            fx, fy = pixel_to_field(px, py, frame_w, frame_h)
+            field_positions.append((fi, fx, fy))
+
+        track_id  = int(tdata.get("track_id", idx + 100))
+        stats     = calculate_player_stats(track_id, field_positions, fps)
+
+        avg_x = float(np.mean([p[1] for p in field_positions]))
+        avg_y = float(np.mean([p[2] for p in field_positions]))
+
+        pid            = idx + 1
+        team_name, team_color = team_map.get(pid, (teamA_name, "#FF4D6D"))
+        pos            = infer_position(avg_x, avg_y, 0 if team_name == teamA_name else 1)
+        jersey_color   = partial[idx]["jerseyColor"]
 
         players.append({
-            "id": idx+1, "trackId": int(tdata.get("track_id", idx+100)),
+            "id": pid, "trackId": track_id,
             "team": team_name, "teamColor": team_color, "position": pos,
-            "totalDist": stats["total_dist"], "sprintDist": stats["sprint_dist"],
-            "topSpeed": stats["top_speed"], "sprints": stats["sprint_count"],
-            "walk": stats["walk"], "jog": stats["jog"], "hiRun": stats["hi_run"],
-            "avgX": round(avg_x,1), "avgY": round(avg_y,1),
-            "rating": rating, "fatigue": "Tinggi" if fatigue_r>0.35 else "Normal",
-            "jerseyColor": colors[idx],
+            "totalDist": stats["totalDist"],   "sprintDist": stats["sprintDist"],
+            "topSpeed":  stats["topSpeed"],    "sprints":    stats["sprints"],
+            "walk":      stats["walk"],        "jog":        stats["jog"],
+            "hiRun":     stats["hiRun"],
+            "avgX": round(avg_x, 1),           "avgY": round(avg_y, 1),
+            "rating":    stats["rating"],      "fatigue":    stats["fatigue"],
+            "jerseyColor": jersey_color,
         })
 
     update_fn(job_id, step="stats", progress=88, message="Building team stats...")
+    team_stats = {
+        "teamA": build_team_stats(players, teamA_name),
+        "teamB": build_team_stats(players, teamB_name),
+    }
     return {
         "videoName": video_name, "duration": dur_str,
         "date": datetime.now().strftime("%d %B %Y"),
-        "teamA": "Tim Merah", "teamB": "Tim Biru",
+        "teamA": teamA_name, "teamB": teamB_name,
         "detectionBackend": backend,
-        "players": players, "teamStats": build_team_stats(players),
+        "players": players, "teamStats": team_stats,
     }
 
 
