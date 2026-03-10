@@ -15,7 +15,7 @@ from processing.stats import calculate_player_stats, calculate_match_rating, pix
 from processing.teams import assign_teams, get_dominant_color
 from processing.ball_tracker import BallTracker, EventDetector, pixel_to_field as ball_pixel_to_field
 
-FRAME_SAMPLE_RATE = 10   # sample every 10th frame
+FRAME_SAMPLE_RATE = 10   # base rate; auto-scaled for long videos (see below)
 MIN_TRACK_FRAMES  = 10
 TARGET_PLAYERS    = 22
 MAX_ASSOC_DIST    = 90
@@ -176,6 +176,17 @@ def process_video(video_path: str, job_id: str, update_fn) -> dict:
     duration_sec = total_frames / fps if fps > 0 else 5400.0
     dur_str      = f"{int(duration_sec)//60:02d}:{int(duration_sec)%60:02d}"
 
+    # ── Adaptive frame sampling based on video duration ─────────────
+    # Short (<5min): every 10 frames | Medium (5-30min): every 20 | Long (>30min): every 45
+    if duration_sec < 300:
+        FRAME_SAMPLE_RATE = 10
+    elif duration_sec < 1800:
+        FRAME_SAMPLE_RATE = 20
+    else:
+        FRAME_SAMPLE_RATE = 45   # 90-min @ 30fps = ~3,600 samples (memory safe)
+
+    import gc; gc.collect()   # free any lingering memory before processing
+
     # ── Choose detection backend ────────────────────────────────────
     update_fn(job_id, step="detect", progress=12, message="Loading detection model...")
     yolo_model = _load_yolo()
@@ -222,7 +233,8 @@ def process_video(video_path: str, job_id: str, update_fn) -> dict:
     update_fn(job_id, step="detect", progress=25, message=f"Detecting with {backend}...")
 
     rf_call_count = 0
-    RF_CALL_LIMIT = 500   # Roboflow free tier limit per video
+    # Roboflow: use for first ~10 min of video (600 frames @ 1fps), rest = YOLOv8n/MOG2
+    RF_CALL_LIMIT = min(600, max(100, int(duration_sec / 9)))
 
     while True:
         ret, frame = cap.read()

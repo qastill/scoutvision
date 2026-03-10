@@ -6,7 +6,7 @@ from processing.detector import process_video
 from reports.match_pdf import generate_match_pdf
 from reports.player_pdf import generate_player_pdf
 
-app = FastAPI(title="ScoutVision API")
+app = FastAPI(title="ScoutVision API", max_upload_size=4 * 1024 * 1024 * 1024)  # 4GB max upload
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
