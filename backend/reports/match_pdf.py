@@ -288,11 +288,11 @@ def _player_table_page(players):
             Paragraph(f'<font color="#FFFFFF"><b>{display_number}</b></font>', _style("td", fontSize=7, alignment=TA_CENTER)),
             Paragraph(f'<font color="#18FFFF">{p.get("position", "CM")}</font>', _style("td", fontSize=7, alignment=TA_CENTER)),
             Paragraph(f'<font color="{team_col}">{p.get("team", "-")[:8]}</font>', _style("td", fontSize=6, alignment=TA_CENTER)),
-            Paragraph(f'<font color="#FFFFFF">{p.get("totalDist", 0):.2f}</font>', _style("td", fontSize=7, alignment=TA_CENTER)),
-            Paragraph(f'<font color="#FFFFFF">{p.get("sprintDist", 0):.2f}</font>', _style("td", fontSize=7, alignment=TA_CENTER)),
+            Paragraph(f'<font color="#FFFFFF">{p.get("totalDist", 0):.3f}</font>', _style("td", fontSize=7, alignment=TA_CENTER)),
+            Paragraph(f'<font color="#FFFFFF">{p.get("sprintDist", 0):.3f}</font>', _style("td", fontSize=7, alignment=TA_CENTER)),
             Paragraph(f'<font color="#FFFFFF">{p.get("topSpeed", 0):.1f}</font>', _style("td", fontSize=7, alignment=TA_CENTER)),
             Paragraph(f'<font color="#FFFFFF">{p.get("sprints", 0)}</font>', _style("td", fontSize=7, alignment=TA_CENTER)),
-            Paragraph(_rating_badge(p.get("rating", 5.0)), _style("td", fontSize=7, alignment=TA_CENTER)),
+            Paragraph(_rating_badge(p.get("matchRating", p.get("rating", 5.0))), _style("td", fontSize=7, alignment=TA_CENTER)),
         ]
         data_rows.append(row)
 

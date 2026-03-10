@@ -64,26 +64,40 @@ def assign_teams(players: list[dict]) -> tuple[list[dict], str, str]:
 
 def get_dominant_color(image_crop, k: int = 3) -> list[int]:
     """
-    Get dominant color from an image crop using K-means.
+    Get dominant JERSEY color from an image crop, ignoring green grass background.
     Returns [R, G, B].
     """
     if image_crop is None or image_crop.size == 0:
         return [128, 128, 128]
 
-    # Resize for speed
     import cv2
-    small = cv2.resize(image_crop, (32, 32))
-    pixels = small.reshape(-1, 3).astype(float)
+
+    # Focus on upper 60% of crop (jersey area, avoid legs/grass)
+    h = image_crop.shape[0]
+    upper = image_crop[:max(int(h * 0.6), 4), :]
+
+    small = cv2.resize(upper, (32, 32))
+
+    # Convert to HSV to mask out grass (green)
+    hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
+    # Grass green: H 35-85, S > 40, V > 40
+    grass_lo = np.array([35, 40, 40])
+    grass_hi = np.array([85, 255, 255])
+    grass_mask = cv2.inRange(hsv, grass_lo, grass_hi)
+    non_grass = small[grass_mask == 0]  # pixels that are NOT grass
+
+    # Fall back to all pixels if >80% was grass
+    pixels = non_grass if len(non_grass) >= max(k, 8) else small.reshape(-1, 3)
+    pixels = pixels.reshape(-1, 3).astype(float)
 
     if len(pixels) < k:
-        return [int(pixels[:, 0].mean()), int(pixels[:, 1].mean()), int(pixels[:, 2].mean())]
+        return [int(pixels[:, 2].mean()), int(pixels[:, 1].mean()), int(pixels[:, 0].mean())]
 
-    kmeans = KMeans(n_clusters=k, random_state=0, n_init=3)
+    kmeans = KMeans(n_clusters=min(k, len(pixels)), random_state=0, n_init=3)
     kmeans.fit(pixels)
 
     # Most common cluster
-    labels = kmeans.labels_
-    counts = np.bincount(labels)
+    counts = np.bincount(kmeans.labels_)
     dominant = kmeans.cluster_centers_[np.argmax(counts)]
 
     # Convert BGR to RGB
