@@ -341,6 +341,8 @@ def process_video(video_path: str, job_id: str, update_fn) -> dict:
         pos            = infer_position(avg_x, avg_y, 0 if team_name == teamA_name else 1)
         jersey_color   = partial[idx]["jerseyColor"]
 
+        # Inject duration so rating formula can scale references
+        stats["_durationSec"] = duration_sec
         # Compute match rating with position-weighted formula
         match_rating   = calculate_match_rating(stats, pos)
 

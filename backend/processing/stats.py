@@ -99,14 +99,18 @@ def calculate_player_stats(
         dy = y2 - y1
         dist = math.sqrt(dx * dx + dy * dy)
 
-        # Sanity check — ignore teleports > 50m/step
-        if dist > 50:
+        # Sanity check — ignore teleports > 15m/step (tracking noise)
+        if dist > 15:
             in_sprint = False
             continue
 
         frame_gap = positions[i][0] - positions[i - 1][0]
-        actual_dt = frame_gap / video_fps
+        actual_dt = frame_gap / max(video_fps, 1)
         speed = (dist / actual_dt) * 3.6 if actual_dt > 0 else 0.0
+
+        # Ignore physically impossible speeds (> 38 km/h = sprint world record)
+        if speed > 38.0:
+            continue
 
         speeds.append(speed)
         total_dist += dist
@@ -261,14 +265,22 @@ def calculate_match_rating(stats: dict, position: str) -> dict:
     activity  = stats.get("activityRate", 0)
     pressing  = stats.get("pressingEvents", 0)
     consistency = stats.get("posConsistency", 50)
+    duration_sec = stats.get("_durationSec", 5400)  # default 90 min
 
-    # Normalise each component to 0–10 (reference = avg pro 90-min match)
-    d_s   = min(10, (total_km    / 10.5) * 7.5)
-    sp_s  = min(10, (sprint_count / 40)  * 7.0)
-    spd_s = min(10, (top_speed   / 32)   * 8.0)
-    i_s   = min(10, (hi_km       / 2.5)  * 7.5)
-    a_s   = min(10, (activity    / 65)   * 7.5)
-    pr_s  = min(10, (pressing    / 80)   * 7.5)
+    # Scale reference values by actual video duration vs 90-minute match
+    duration_ratio = max(duration_sec / 5400.0, 0.01)
+    ref_dist   = 10.5  * duration_ratio   # km expected in this duration
+    ref_sprint = 40    * duration_ratio
+    ref_hi     = 2.5   * duration_ratio
+    ref_press  = 80    * duration_ratio
+
+    # Normalise each component to 0–10
+    d_s   = min(10, (total_km    / max(ref_dist, 0.01))  * 7.5)
+    sp_s  = min(10, (sprint_count / max(ref_sprint, 1))  * 7.0)
+    spd_s = min(10, (top_speed   / 32)                   * 8.0)   # speed not time-dependent
+    i_s   = min(10, (hi_km       / max(ref_hi, 0.01))    * 7.5)
+    a_s   = min(10, (activity    / 65)                   * 7.5)   # activity rate not time-dependent
+    pr_s  = min(10, (pressing    / max(ref_press, 1))    * 7.5)
     c_s   = min(10,  consistency / 10)
 
     # Position-specific weights [distance, sprints, speed, intensity, activity, pressing, consistency]
@@ -286,13 +298,13 @@ def calculate_match_rating(stats: dict, position: str) -> dict:
 
     base = sum(s * wt for s, wt in zip([d_s, sp_s, spd_s, i_s, a_s, pr_s, c_s], w))
 
-    # Bonus / penalty modifiers
+    # Bonus / penalty modifiers (also scaled by duration)
     bonus = 0.0
-    if top_speed   >= 33:  bonus += 0.3
-    if total_km    >= 12:  bonus += 0.4
-    if sprint_count >= 60: bonus += 0.2
-    if activity    < 40:   bonus -= 0.5
-    if total_km    < 5:    bonus -= 0.8
+    if top_speed   >= 30:  bonus += 0.3   # lowered threshold (speed is absolute)
+    if d_s         >= 8.0: bonus += 0.4   # high distance relative to duration
+    if sp_s        >= 8.0: bonus += 0.2   # high sprint count relative to duration
+    if activity    < 35:   bonus -= 0.4
+    if d_s         < 2.0:  bonus -= 0.5   # very low effort relative to duration
 
     r = round(min(10.0, max(3.0, base + bonus)), 1)
 
