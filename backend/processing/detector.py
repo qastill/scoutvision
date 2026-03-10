@@ -370,6 +370,8 @@ def process_video(video_path: str, job_id: str, update_fn) -> dict:
             "matchRating":     match_rating["matchRating"],
             "ratingGrade":     match_rating["ratingGrade"],
             "ratingBreakdown": match_rating["ratingBreakdown"],
+            # Best crop (numpy array — not JSON serializable, removed in main.py)
+            "_crop": tdata["crops"][0] if tdata.get("crops") else None,
         }
         # Merge ball event stats
         event_stats = event_detector.get_player_stats(pid)

@@ -1,6 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 import uuid, json, os, asyncio
 from processing.detector import process_video
 from reports.match_pdf import generate_match_pdf
@@ -38,6 +38,23 @@ async def run_pipeline(job_id: str, video_path: str):
             message="Video processed! Ready for roster input.",
             results=results
         )
+
+        # Save player thumbnail crops to disk (from detector._crop field)
+        import cv2 as _cv2
+        for player in results.get("players", []):
+            pid = player["id"]
+            crop = player.pop("_crop", None)  # remove non-JSON-serializable numpy array
+            if crop is not None and hasattr(crop, 'shape'):
+                thumb_path = f"/tmp/sv_{job_id}_thumb_{pid}.jpg"
+                try:
+                    resized = _cv2.resize(crop, (80, 120), interpolation=_cv2.INTER_LINEAR)
+                    _cv2.imwrite(thumb_path, resized)
+                    player["_thumb_path"] = thumb_path
+                except Exception:
+                    player["_thumb_path"] = None
+            else:
+                player["_thumb_path"] = None
+
     except Exception as e:
         import traceback
         update_job(job_id, status="error", message=str(e), error=traceback.format_exc())
@@ -98,6 +115,64 @@ async def generate_pdfs(job_id: str):
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "scoutvision"}
+
+
+@app.get("/api/player/{job_id}/thumb/{player_id}")
+def get_player_thumb(job_id: str, player_id: int):
+    """Return cropped player thumbnail JPEG, or colored SVG placeholder."""
+    if job_id not in jobs:
+        raise HTTPException(404, "Job not found")
+    j = jobs[job_id]
+    if j.get("status") not in ("processed", "generating", "done"):
+        raise HTTPException(400, "Not ready")
+
+    results = j.get("results", {})
+    players = results.get("players", [])
+    player = next((p for p in players if p["id"] == player_id), None)
+
+    thumb_path = player.get("_thumb_path") if player else None
+    if thumb_path and os.path.exists(thumb_path):
+        return FileResponse(thumb_path, media_type="image/jpeg")
+
+    # Colored SVG placeholder
+    jersey = player.get("jerseyColor", [128, 128, 128]) if player else [128, 128, 128]
+    r, g, b = int(jersey[0]), int(jersey[1]), int(jersey[2])
+    pid_label = str(player_id)
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="80" height="120" viewBox="0 0 80 120">
+  <rect width="80" height="120" fill="#0D1520" rx="4"/>
+  <circle cx="40" cy="35" r="18" fill="#{r:02X}{g:02X}{b:02X}" opacity="0.8"/>
+  <text x="40" y="41" font-family="Arial" font-size="16" font-weight="bold" fill="white" text-anchor="middle">{pid_label}</text>
+  <rect x="15" y="60" width="50" height="40" rx="4" fill="#{r:02X}{g:02X}{b:02X}" opacity="0.6"/>
+  <text x="40" y="85" font-family="Arial" font-size="11" fill="white" text-anchor="middle">PLAYER</text>
+  <text x="40" y="100" font-family="Arial" font-size="11" fill="white" text-anchor="middle">#{pid_label}</text>
+</svg>'''
+    return Response(content=svg, media_type="image/svg+xml")
+
+
+@app.get("/api/players/{job_id}")
+def get_players_info(job_id: str):
+    """Return player list with position/zone data when in processed state."""
+    if job_id not in jobs:
+        raise HTTPException(404, "Job not found")
+    j = jobs[job_id]
+    if j.get("status") not in ("processed", "generating", "done"):
+        raise HTTPException(400, "Not ready")
+    players = j.get("results", {}).get("players", [])
+    safe = []
+    for p in players:
+        safe.append({
+            "id": p["id"],
+            "team": p.get("team", ""),
+            "teamColor": p.get("teamColor", "#FFFFFF"),
+            "jerseyColor": p.get("jerseyColor", [128, 128, 128]),
+            "position": p.get("position", "CM"),
+            "avgX": p.get("avgX", 52.5),
+            "avgY": p.get("avgY", 34.0),
+            "attackPct": p.get("attackPct", 0),
+            "midPct": p.get("midPct", 0),
+            "defPct": p.get("defPct", 0),
+        })
+    return {"players": safe}
 
 
 @app.post("/api/upload")
