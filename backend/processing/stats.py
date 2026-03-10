@@ -99,17 +99,14 @@ def calculate_player_stats(
         dy = y2 - y1
         dist = math.sqrt(dx * dx + dy * dy)
 
-        # Sanity check — ignore teleports > 15m/step (tracking noise)
-        if dist > 15:
-            in_sprint = False
-            continue
-
         frame_gap = positions[i][0] - positions[i - 1][0]
         actual_dt = frame_gap / max(video_fps, 1)
         speed = (dist / actual_dt) * 3.6 if actual_dt > 0 else 0.0
 
-        # Ignore physically impossible speeds (> 38 km/h = sprint world record)
-        if speed > 38.0:
+        # Ignore physically impossible speeds (> 42 km/h)
+        # Use speed filter instead of raw distance to handle varying sample rates
+        if speed > 42.0 or dist > 30:
+            in_sprint = False
             continue
 
         speeds.append(speed)
@@ -198,11 +195,11 @@ def calculate_player_stats(
 
     return {
         "trackId": track_id,
-        "totalDist": round(total_km, 2),
-        "sprintDist": round(sprint_km, 2),
-        "hiRun": round(hirun_km, 2),
-        "jog": round(jog_km, 2),
-        "walk": round(walk_km, 2),
+        "totalDist": round(total_km, 3),
+        "sprintDist": round(sprint_km, 3),
+        "hiRun": round(hirun_km, 3),
+        "jog": round(jog_km, 3),
+        "walk": round(walk_km, 3),
         "topSpeed": round(top_speed, 1),
         "sprints": sprint_count,
         "avgX": round(avg_x, 1),
