@@ -87,7 +87,8 @@ def generate_match_pdf(results: dict, output_path: str):
     story.append(PageBreak())
 
     # ── PAGE 3: Full Player Table ────────────────────────────────────────────
-    story += _player_table_page(players)
+    events = results.get("manualEvents") or results.get("ballEvents") or []
+    story += _player_table_page(players, events)
 
     doc.build(story, onFirstPage=_page_background, onLaterPages=_page_background)
 
@@ -257,10 +258,46 @@ def _cmp_row(metric, val_a, val_b):
     ]
 
 
-def _player_table_page(players):
+def _player_table_page(players, events=None):
     elems = []
 
-    elems.append(Spacer(1, 5 * mm))
+    # ── MAN OF THE MATCH BANNER ──────────────────────────────────────────────
+    motm = next((p for p in players if p.get("manOfTheMatch")), None)
+    if motm:
+        motm_pid = motm.get("id", "?")
+        motm_name = motm.get("name", f"Player #{motm_pid}")
+        motm_pos = motm.get("position", "CM")
+        motm_rating = motm.get("matchRating", motm.get("rating", 5.0))
+        motm_grade = motm.get("ratingGrade", "")
+        motm_data = [[
+            Paragraph(
+                f'<font color="#080C12"><b>🏆 MAN OF THE MATCH</b></font>',
+                _style("motm_t", fontSize=14, fontName="Helvetica-Bold",
+                       alignment=TA_CENTER, textColor=HexColor("#080C12"))
+            ),
+            Paragraph(
+                f'<font color="#080C12"><b>{motm_name}</b>  —  {motm_pos}  —  Rating {motm_rating:.1f} {motm_grade}</font>',
+                _style("motm_v", fontSize=12, fontName="Helvetica-Bold",
+                       alignment=TA_CENTER, textColor=HexColor("#080C12"))
+            ),
+        ]]
+        motm_t = Table(motm_data, colWidths=[(PAGE_W - 30*mm)/2, (PAGE_W - 30*mm)/2])
+        motm_t.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, -1), HexColor("#FFD700")),
+            ("TOPPADDING",    (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
+            ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+            ("LINEBELOW",     (0, 0), (-1, -1), 2, HexColor("#B8860B")),
+        ]))
+        elems.append(Spacer(1, 5 * mm))
+        elems.append(motm_t)
+        elems.append(Spacer(1, 4 * mm))
+    else:
+        elems.append(Spacer(1, 5 * mm))
+
     elems.append(Paragraph(
         '<font color="#00E676">PLAYER</font> <font color="#FFFFFF">STATISTICS</font>',
         _style("hdr", fontSize=20, fontName="Helvetica-Bold", alignment=TA_CENTER)
@@ -268,7 +305,7 @@ def _player_table_page(players):
     elems.append(Spacer(1, 2 * mm))
     elems.append(HRFlowable(width="100%", thickness=1, color=BORDER, spaceAfter=6))
 
-    headers = ["No", "No.Jrsy", "Pos", "Team", "Dist(km)", "Sprint(km)", "Top Spd", "Sprints", "Rating"]
+    headers = ["No", "No.Jrsy", "Pos", "Team", "Dist(km)", "Sprint(km)", "Top Spd", "Sprints", "Goals", "Assists", "Rating"]
     header_row = [
         Paragraph(f'<font color="#FFD600"><b>{h}</b></font>',
                   _style("th", fontSize=7, alignment=TA_CENTER))
@@ -281,8 +318,8 @@ def _player_table_page(players):
         pid = p["id"]
         display_name = p.get("name", f"Pemain #{pid}")
         display_number = str(p.get("number", pid))
-        # Truncate long names for table
-        display_name_short = display_name[:10] if len(display_name) > 10 else display_name
+        is_motm = p.get("manOfTheMatch", False)
+        row_bg_override = HexColor("#1A1500") if is_motm else None  # subtle gold tint for MoTM row
         row = [
             Paragraph(f'<font color="#B0BEC5">{i + 1}</font>', _style("td", fontSize=7, alignment=TA_CENTER)),
             Paragraph(f'<font color="#FFFFFF"><b>{display_number}</b></font>', _style("td", fontSize=7, alignment=TA_CENTER)),
@@ -292,11 +329,15 @@ def _player_table_page(players):
             Paragraph(f'<font color="#FFFFFF">{p.get("sprintDist", 0):.3f}</font>', _style("td", fontSize=7, alignment=TA_CENTER)),
             Paragraph(f'<font color="#FFFFFF">{p.get("topSpeed", 0):.1f}</font>', _style("td", fontSize=7, alignment=TA_CENTER)),
             Paragraph(f'<font color="#FFFFFF">{p.get("sprints", 0)}</font>', _style("td", fontSize=7, alignment=TA_CENTER)),
-            Paragraph(_rating_badge(p.get("matchRating", p.get("rating", 5.0))), _style("td", fontSize=7, alignment=TA_CENTER)),
+            Paragraph(f'<font color="#FFD600"><b>{p.get("goals", 0)}</b></font>', _style("td", fontSize=7, alignment=TA_CENTER)),
+            Paragraph(f'<font color="#18FFFF"><b>{p.get("assists", 0)}</b></font>', _style("td", fontSize=7, alignment=TA_CENTER)),
+            Paragraph(_rating_badge(p.get("matchRating", p.get("rating", 5.0))) +
+                      (' <font color="#FFD700">🏆</font>' if is_motm else ""),
+                      _style("td", fontSize=7, alignment=TA_CENTER)),
         ]
         data_rows.append(row)
 
-    col_widths = [10 * mm, 12 * mm, 12 * mm, 22 * mm, 18 * mm, 20 * mm, 17 * mm, 16 * mm, 15 * mm]
+    col_widths = [9*mm, 11*mm, 11*mm, 18*mm, 16*mm, 17*mm, 15*mm, 14*mm, 12*mm, 13*mm, 16*mm]
     t = Table(data_rows, colWidths=col_widths, repeatRows=1)
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), HexColor("#0A1018")),
@@ -309,8 +350,62 @@ def _player_table_page(players):
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("GRID", (0, 0), (-1, -1), 0.3, BORDER),
     ]
+    # Highlight MoTM row
+    for i, p in enumerate(players):
+        if p.get("manOfTheMatch"):
+            row_i = i + 1  # +1 for header
+            style.append(("BACKGROUND", (0, row_i), (-1, row_i), HexColor("#1A1500")))
     t.setStyle(TableStyle(style))
     elems.append(t)
+
+    # ── KEJADIAN PERTANDINGAN ────────────────────────────────────────────────
+    if events:
+        elems.append(Spacer(1, 6 * mm))
+        elems.append(HRFlowable(width="100%", thickness=1, color=BORDER))
+        elems.append(Spacer(1, 4 * mm))
+        elems.append(Paragraph(
+            '<font color="#FFD600">⚽ KEJADIAN PERTANDINGAN</font>',
+            _style("ev_hdr", fontSize=13, fontName="Helvetica-Bold")
+        ))
+        elems.append(Spacer(1, 3 * mm))
+
+        # Build player name map
+        player_name_map = {p["id"]: p.get("name", f"Player #{p['id']}") for p in players}
+
+        ev_headers = [
+            Paragraph('<font color="#FFD600"><b>Menit</b></font>', _style("eth", fontSize=8, alignment=TA_CENTER)),
+            Paragraph('<font color="#FFD600"><b>Jenis</b></font>', _style("eth", fontSize=8, alignment=TA_CENTER)),
+            Paragraph('<font color="#FFD600"><b>Pemain</b></font>', _style("eth", fontSize=8, alignment=TA_CENTER)),
+            Paragraph('<font color="#FFD600"><b>Assist</b></font>', _style("eth", fontSize=8, alignment=TA_CENTER)),
+        ]
+        ev_rows = [ev_headers]
+        for ev in events:
+            ev_type = ev.get("type", "goal")
+            minute = ev.get("minute", ev.get("menit", "?"))
+            # Handle both backend ball events (player_id) and manual events (playerId)
+            scorer_id = ev.get("player_id") or ev.get("playerId")
+            assist_id = ev.get("assist_player_id") or ev.get("assistPlayerId")
+            scorer_name = player_name_map.get(scorer_id, f"#{scorer_id}") if scorer_id else "-"
+            assist_name = player_name_map.get(assist_id, f"#{assist_id}") if assist_id else "-"
+            type_display = {"goal": "⚽ GOL", "yellow": "🟨 Kartu Kuning", "red": "🟥 Kartu Merah"}.get(ev_type, ev_type)
+            ev_rows.append([
+                Paragraph(f'<font color="#FFFFFF">{minute}\'</font>', _style("etd", fontSize=8, alignment=TA_CENTER)),
+                Paragraph(f'<font color="#FFFFFF">{type_display}</font>', _style("etd", fontSize=8, alignment=TA_CENTER)),
+                Paragraph(f'<font color="#18FFFF">{scorer_name}</font>', _style("etd", fontSize=8, alignment=TA_CENTER)),
+                Paragraph(f'<font color="#B0BEC5">{assist_name}</font>', _style("etd", fontSize=8, alignment=TA_CENTER)),
+            ])
+
+        ev_t = Table(ev_rows, colWidths=[20*mm, 45*mm, 60*mm, 60*mm], repeatRows=1)
+        ev_t.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, 0), HexColor("#0A1018")),
+            ("ROWBACKGROUNDS",(0, 1), (-1, -1), [DARK_CARD, MID_CARD]),
+            ("TOPPADDING",    (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+            ("GRID",          (0, 0), (-1, -1), 0.3, BORDER),
+        ]))
+        elems.append(ev_t)
 
     return elems
 

@@ -324,6 +324,35 @@
   .btn-generate-report:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,230,118,0.35); }
   .btn-generate-report:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
+  /* ── KEJADIAN PERTANDINGAN ── */
+  .kejadian-section { display: none; margin-bottom: 40px; }
+  .kejadian-section.show { display: block; }
+  .kejadian-header { background: var(--surface); border: 1px solid var(--amber); border-radius: 12px; padding: 20px 24px; margin-bottom: 20px; }
+  .kejadian-header h2 { font-size: 20px; color: var(--amber); margin-bottom: 6px; }
+  .kejadian-header p { color: var(--muted); font-size: 14px; }
+  .kejadian-auto-info { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; color: var(--muted); font-size: 14px; }
+  .kejadian-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; min-height: 0; }
+  .kejadian-item { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .kejadian-item-info { flex: 1; font-size: 14px; }
+  .kejadian-item-type { font-weight: 700; color: var(--amber); margin-right: 8px; }
+  .kejadian-item-detail { color: var(--text); }
+  .btn-del-ev { background: rgba(0,0,0,0.5); border: 1px solid var(--red); color: var(--red); border-radius: 4px; padding: 3px 8px; cursor: pointer; font-size: 12px; }
+  .kejadian-actions { display: flex; gap: 12px; justify-content: flex-end; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 24px; }
+  .btn-add-event { background: var(--card); border: 1px solid var(--amber); color: var(--amber); font-weight: 600; font-size: 14px; padding: 10px 20px; border-radius: 8px; cursor: pointer; transition: all 0.2s; }
+  .btn-add-event:hover { background: rgba(255,214,0,0.1); }
+  /* Event Modal */
+  .ev-modal-overlay { display: none; position: fixed; inset: 0; z-index: 300; background: rgba(0,0,0,0.75); align-items: center; justify-content: center; }
+  .ev-modal-overlay.show { display: flex; }
+  .ev-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; width: 100%; max-width: 440px; }
+  .ev-modal h3 { font-size: 18px; margin-bottom: 16px; color: var(--amber); }
+  .ev-form-group { margin-bottom: 14px; }
+  .ev-form-group label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .ev-form-group select, .ev-form-group input { width: 100%; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+  .ev-form-group select:focus, .ev-form-group input:focus { outline: none; border-color: var(--amber); }
+  .ev-modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+  .btn-ev-cancel { background: var(--card); border: 1px solid var(--border); color: var(--muted); padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  .btn-ev-save { background: var(--amber); border: none; color: #000; font-weight: 700; padding: 10px 22px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+
   /* ── RESULTS ── */
   .results-section { display: none; }
   .results-section.show { display: block; }
@@ -722,6 +751,53 @@
     </div>
   </div>
 
+  <!-- KEJADIAN PERTANDINGAN (Step 3) -->
+  <div class="kejadian-section" id="kejadianSection">
+    <div class="kejadian-header">
+      <h2>⚽ KEJADIAN PERTANDINGAN <span style="color:var(--muted);font-size:16px">(Opsional)</span></h2>
+      <p>Tambahkan atau koreksi kejadian pertandingan — gol, kartu kuning, kartu merah. Bisa dilewati.</p>
+    </div>
+    <div class="kejadian-auto-info" id="kejadianAutoInfo">🔍 Menghitung kejadian dari video...</div>
+    <div class="kejadian-list" id="kejadianList"></div>
+    <div class="kejadian-actions">
+      <div style="flex:1;color:var(--muted);font-size:13px">💡 Kejadian akan muncul di PDF laporan pertandingan.</div>
+      <button class="btn-add-event" onclick="openEvModal()">+ Tambah / Koreksi Kejadian</button>
+      <button class="btn-skip" onclick="skipKejadian()">⏭ Lewati</button>
+      <button class="btn-generate-report" onclick="submitKejadian()">✅ Simpan &amp; Generate Laporan</button>
+    </div>
+  </div>
+
+  <!-- EVENT MODAL -->
+  <div class="ev-modal-overlay" id="evModalOverlay" onclick="closeEvModal(event)">
+    <div class="ev-modal" onclick="event.stopPropagation()">
+      <h3>➕ Tambah Kejadian</h3>
+      <div class="ev-form-group">
+        <label>Jenis Kejadian</label>
+        <select id="evType" onchange="onEvTypeChange()">
+          <option value="goal">⚽ Gol</option>
+          <option value="yellow">🟨 Kartu Kuning</option>
+          <option value="red">🟥 Kartu Merah</option>
+        </select>
+      </div>
+      <div class="ev-form-group">
+        <label>Menit</label>
+        <input type="number" id="evMinute" min="1" max="120" placeholder="Mis: 45">
+      </div>
+      <div class="ev-form-group">
+        <label>Pemain</label>
+        <select id="evPlayer"></select>
+      </div>
+      <div class="ev-form-group" id="evAssistGroup">
+        <label>Assist Oleh (Opsional)</label>
+        <select id="evAssist"><option value="">— Tidak ada —</option></select>
+      </div>
+      <div class="ev-modal-actions">
+        <button class="btn-ev-cancel" onclick="closeEvModal()">Batal</button>
+        <button class="btn-ev-save" onclick="saveEvModal()">Simpan</button>
+      </div>
+    </div>
+  </div>
+
   <!-- RESULTS -->
   <div class="results-section" id="resultsSection">
     <div class="results-header">
@@ -785,6 +861,8 @@ let currentJobId  = null;
 
 // Player colours from backend (set when "processed" fires)
 let rosterPlayerInfo = []; // [{id, teamColor, jerseyColor}]
+let kejadianEvents = []; // manual events list
+let rosterSubmitted = false; // track if roster was posted or skipped
 
 // ── UPLOAD ZONE ──────────────────────────────────────
 const uploadZone = document.getElementById('uploadZone');
@@ -1109,38 +1187,9 @@ function removePhoto(pid) {
 async function skipRoster() {
   if (!currentJobId) return;
   document.getElementById('rosterSection').classList.remove('show');
-  document.getElementById('progressSection').classList.add('show');
-  document.getElementById('progressBar').style.width = '90%';
-  document.getElementById('progressPct').textContent = '90%';
-  try {
-    const resp = await fetch(API_BASE + '/api/roster/' + currentJobId + '/skip', { method: 'POST' });
-    if (!resp.ok) throw new Error('Skip failed: ' + resp.status);
-  } catch(e) {
-    showToast('Error: ' + e.message);
-    document.getElementById('progressSection').classList.remove('show');
-    return;
-  }
-  // Poll until done
-  const doneInterval = setInterval(async () => {
-    try {
-      const s = await (await fetch(API_BASE + '/api/status/' + currentJobId)).json();
-      document.getElementById('progressBar').style.width = s.progress + '%';
-      document.getElementById('progressPct').textContent = s.progress + '%';
-      if (s.status === 'done') {
-        clearInterval(doneInterval);
-        const results = await (await fetch(API_BASE + '/api/results/' + currentJobId)).json();
-        results._jobId = currentJobId;
-        analysisData = results;
-        document.getElementById('progressSection').classList.remove('show');
-        renderResults();
-        showToast('Laporan siap! ' + results.players.length + ' pemain terdeteksi.');
-      } else if (s.status === 'error') {
-        clearInterval(doneInterval);
-        showToast('Error: ' + s.message);
-        document.getElementById('progressSection').classList.remove('show');
-      }
-    } catch(e) { console.error(e); }
-  }, 2500);
+  // Don't generate yet — show kejadian step first
+  rosterSubmitted = true;
+  showKejadianStep();
 }
 
 async function submitRoster() {
@@ -1158,30 +1207,33 @@ async function submitRoster() {
     if (num)   fd.append(`player_${i}_number`, num);
     if (photo) fd.append(`player_${i}_photo`, photo);
   }
-  await _postRosterAndPoll(fd);
-}
 
-async function _postRosterAndPoll(formData) {
   document.getElementById('rosterSection').classList.remove('show');
-  document.getElementById('progressSection').classList.add('show');
-  document.getElementById('progressBar').style.width = '90%';
-  document.getElementById('progressPct').textContent = '90%';
-  // Reset step icons to show generating state
-  const stepEl = document.getElementById('step4');
-  if (stepEl) { stepEl.className = 'step active'; const ic = stepEl.querySelector('.step-icon'); if(ic) ic.textContent='4'; }
-
   try {
     const resp = await fetch(API_BASE + '/api/roster/' + currentJobId, {
-      method: 'POST', body: formData
+      method: 'POST', body: fd
     });
     if (!resp.ok) throw new Error('Roster submit failed: ' + resp.status);
   } catch(e) {
     showToast('Error: ' + e.message);
-    document.getElementById('progressSection').classList.remove('show');
+    document.getElementById('rosterSection').classList.add('show');
+    btn.disabled = false;
+    btn.textContent = '✅ Generate Laporan';
     return;
   }
+  btn.disabled = false;
+  btn.textContent = '✅ Generate Laporan';
+  rosterSubmitted = true;
+  showKejadianStep();
+}
 
-  // Poll until done
+async function _pollUntilDone() {
+  document.getElementById('progressSection').classList.add('show');
+  document.getElementById('progressBar').style.width = '90%';
+  document.getElementById('progressPct').textContent = '90%';
+  const stepEl = document.getElementById('step4');
+  if (stepEl) { stepEl.className = 'step active'; const ic = stepEl.querySelector('.step-icon'); if(ic) ic.textContent='4'; }
+
   const doneInterval = setInterval(async () => {
     try {
       const s = await (await fetch(API_BASE + '/api/status/' + currentJobId)).json();
@@ -1202,6 +1254,135 @@ async function _postRosterAndPoll(formData) {
       }
     } catch(e) { console.error(e); }
   }, 2500);
+}
+
+// ── KEJADIAN PERTANDINGAN ─────────────────────────────────────────────────────
+
+function showKejadianStep() {
+  kejadianEvents = [];
+  // Merge roster-entered names into rosterPlayerInfo
+  if (rosterPlayerInfo && rosterPlayerInfo.length > 0) {
+    rosterPlayerInfo.forEach(p => {
+      const nameEl = document.getElementById('r_name_' + p.id);
+      if (nameEl && nameEl.value.trim()) p.name = nameEl.value.trim();
+      const numEl = document.getElementById('r_num_' + p.id);
+      if (numEl && numEl.value.trim()) p.number = numEl.value.trim();
+    });
+  }
+
+  const sec = document.getElementById('kejadianSection');
+  sec.classList.add('show');
+  sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  // Show auto-detected goals count
+  const autoInfo = document.getElementById('kejadianAutoInfo');
+  const players = rosterPlayerInfo || [];
+  const totalGoals = players.reduce((s, p) => s + (p.goals || 0), 0);
+  autoInfo.textContent = `🔍 Auto-detected: ${totalGoals} gol terdeteksi dari video. Tambahkan atau koreksi di bawah.`;
+
+  renderKejadianList();
+  populateEvPlayerDropdowns();
+}
+
+function populateEvPlayerDropdowns() {
+  const players = rosterPlayerInfo || [];
+  const playerSel = document.getElementById('evPlayer');
+  const assistSel = document.getElementById('evAssist');
+  playerSel.innerHTML = '<option value="">— Pilih Pemain —</option>';
+  assistSel.innerHTML = '<option value="">— Tidak ada —</option>';
+  players.forEach(p => {
+    const name = p.name || `Pemain #${p.id}`;
+    const opt1 = `<option value="${p.id}">${name} (${p.team || ''})</option>`;
+    playerSel.innerHTML += opt1;
+    assistSel.innerHTML += opt1;
+  });
+}
+
+function renderKejadianList() {
+  const list = document.getElementById('kejadianList');
+  list.innerHTML = '';
+  if (kejadianEvents.length === 0) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:10px 0">Belum ada kejadian ditambahkan.</div>';
+    return;
+  }
+  kejadianEvents.forEach((ev, idx) => {
+    const typeLabel = { goal: '⚽ Gol', yellow: '🟨 Kartu Kuning', red: '🟥 Kartu Merah' }[ev.type] || ev.type;
+    const players = rosterPlayerInfo || [];
+    const scorer = players.find(p => p.id === ev.playerId);
+    const assistP = players.find(p => p.id === ev.assistPlayerId);
+    const scorerName = scorer ? (scorer.name || `Pemain #${scorer.id}`) : `#${ev.playerId}`;
+    const assistName = assistP ? (assistP.name || `Pemain #${assistP.id}`) : '';
+    const assistTxt = assistName ? ` (assist: ${assistName})` : '';
+    const item = document.createElement('div');
+    item.className = 'kejadian-item';
+    item.innerHTML = `<div class="kejadian-item-info"><span class="kejadian-item-type">${typeLabel}</span><span class="kejadian-item-detail">${ev.menit}' — ${scorerName}${assistTxt}</span></div><button class="btn-del-ev" onclick="deleteKejadian(${idx})">✕ Hapus</button>`;
+    list.appendChild(item);
+  });
+}
+
+function deleteKejadian(idx) {
+  kejadianEvents.splice(idx, 1);
+  renderKejadianList();
+}
+
+function openEvModal() {
+  document.getElementById('evModalOverlay').classList.add('show');
+  document.getElementById('evMinute').value = '';
+  document.getElementById('evPlayer').value = '';
+  document.getElementById('evAssist').value = '';
+  document.getElementById('evAssistGroup').style.display = 'block';
+}
+
+function closeEvModal(e) {
+  if (e && e.target !== document.getElementById('evModalOverlay')) return;
+  document.getElementById('evModalOverlay').classList.remove('show');
+}
+
+function onEvTypeChange() {
+  const t = document.getElementById('evType').value;
+  document.getElementById('evAssistGroup').style.display = (t === 'goal') ? 'block' : 'none';
+}
+
+function saveEvModal() {
+  const type = document.getElementById('evType').value;
+  const menit = parseInt(document.getElementById('evMinute').value) || 0;
+  const playerId = parseInt(document.getElementById('evPlayer').value) || null;
+  const assistPlayerId = (type === 'goal') ? (parseInt(document.getElementById('evAssist').value) || null) : null;
+  if (!playerId) { showToast('Pilih pemain terlebih dahulu!'); return; }
+  if (!menit || menit < 1) { showToast('Masukkan menit yang valid!'); return; }
+  kejadianEvents.push({ type, menit, playerId, assistPlayerId });
+  renderKejadianList();
+  document.getElementById('evModalOverlay').classList.remove('show');
+}
+
+async function _triggerGenerate() {
+  // Always call /api/roster/{id}/skip to trigger generation
+  // (works for both 'processed' and 'roster_saved' states)
+  try {
+    await fetch(API_BASE + '/api/roster/' + currentJobId + '/skip', { method: 'POST' });
+  } catch(e) { console.error('Trigger generate error:', e); }
+}
+
+async function skipKejadian() {
+  document.getElementById('kejadianSection').classList.remove('show');
+  await _triggerGenerate();
+  _pollUntilDone();
+}
+
+async function submitKejadian() {
+  document.getElementById('kejadianSection').classList.remove('show');
+  // Post events first
+  if (kejadianEvents.length > 0) {
+    try {
+      await fetch(API_BASE + '/api/events/' + currentJobId, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ events: kejadianEvents }),
+      });
+    } catch(e) { console.error('Events post error:', e); }
+  }
+  await _triggerGenerate();
+  _pollUntilDone();
 }
 
 // ── MOCK DATA ─────────────────────────────────────────

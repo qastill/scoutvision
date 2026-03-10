@@ -88,6 +88,10 @@ async def generate_pdfs(job_id: str):
 
         results_with_roster = dict(results)
         results_with_roster["players"] = players_with_roster
+        # Include manual events in PDF data
+        manual_events = j.get("manual_events", [])
+        if manual_events:
+            results_with_roster["manualEvents"] = manual_events
 
         match_pdf_path = f"/tmp/sv_{job_id}_match.pdf"
         player_pdfs = {}
@@ -197,19 +201,21 @@ async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = Fil
 @app.post("/api/roster/{job_id}/skip")
 @app.get("/api/roster/{job_id}/skip")
 async def skip_roster(job_id: str, background_tasks: BackgroundTasks):
-    """Skip roster input and generate PDFs immediately — no body required."""
+    """Skip roster input and generate PDFs — also used as the generate trigger after kejadian step."""
     if job_id not in jobs:
         raise HTTPException(404, "Job not found")
-    if jobs[job_id]["status"] not in ("processed",):
+    if jobs[job_id]["status"] not in ("processed", "roster_saved"):
         raise HTTPException(400, f"Job not ready: {jobs[job_id]['status']}")
-    jobs[job_id]["roster"] = {}
+    if "roster" not in jobs[job_id]:
+        jobs[job_id]["roster"] = {}
     background_tasks.add_task(generate_pdfs, job_id)
     return {"status": "generating", "jobId": job_id}
 
 
 @app.post("/api/roster/{job_id}")
-async def submit_roster(job_id: str, background_tasks: BackgroundTasks, request: Request):
-    """Accept roster data (names, numbers, photos) and trigger PDF generation."""
+async def submit_roster(job_id: str, request: Request):
+    """Accept roster data (names, numbers, photos). Does NOT trigger PDF generation.
+    Call /api/roster/{id}/skip afterwards to generate."""
     if job_id not in jobs:
         raise HTTPException(404, "Job not found")
     if jobs[job_id]["status"] not in ("processed",):
@@ -252,8 +258,8 @@ async def submit_roster(job_id: str, background_tasks: BackgroundTasks, request:
                     roster[pid]["photo_path"] = photo_path
 
     jobs[job_id]["roster"] = roster
-    background_tasks.add_task(generate_pdfs, job_id)
-    return {"status": "generating", "jobId": job_id}
+    jobs[job_id]["status"] = "roster_saved"
+    return {"status": "roster_saved", "jobId": job_id}
 
 
 @app.get("/api/status/{job_id}")
@@ -270,6 +276,39 @@ def get_status(job_id: str):
     }
 
 
+@app.post("/api/events/{job_id}")
+async def submit_events(job_id: str, request: Request):
+    """Store manual game events (goals, cards) and update player stats."""
+    if job_id not in jobs:
+        raise HTTPException(404, "Job not found")
+    if jobs[job_id]["status"] not in ("processed", "roster_saved", "generating", "done"):
+        raise HTTPException(400, f"Job not ready for events: {jobs[job_id]['status']}")
+    data = await request.json()
+    events = data.get("events", [])
+    jobs[job_id]["manual_events"] = events
+    # Update player goal/assist counts from manual events
+    players = jobs[job_id].get("results", {}).get("players", [])
+    if players and events:
+        player_map = {p["id"]: p for p in players}
+        for p in players:
+            p["goals"] = 0
+            p["assists"] = 0
+        for ev in events:
+            if ev.get("type") == "goal":
+                pid = ev.get("playerId")
+                apid = ev.get("assistPlayerId")
+                if pid and pid in player_map:
+                    player_map[pid]["goals"] = player_map[pid].get("goals", 0) + 1
+                if apid and apid in player_map:
+                    player_map[apid]["assists"] = player_map[apid].get("assists", 0) + 1
+        # Recompute Man of the Match after manual updates
+        if players:
+            best = max(players, key=lambda p: p.get("matchRating", 5.0))
+            for p in players:
+                p["manOfTheMatch"] = (p is best)
+    return {"status": "ok", "eventsCount": len(events)}
+
+
 @app.get("/api/results/{job_id}")
 def get_results(job_id: str):
     if job_id not in jobs:
@@ -280,6 +319,9 @@ def get_results(job_id: str):
     r = dict(j["results"])
     r.pop("_match_pdf", None)
     r.pop("_player_pdfs", None)
+    # Include manual events if present
+    if j.get("manual_events"):
+        r["manualEvents"] = j["manual_events"]
     return r
 
 

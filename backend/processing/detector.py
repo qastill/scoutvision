@@ -375,11 +375,16 @@ def process_video(video_path: str, job_id: str, update_fn) -> dict:
             # Best crop (numpy array — not JSON serializable, removed in main.py)
             "_crop": tdata["crops"][0] if tdata.get("crops") else None,
         }
-        # Merge ball event stats
+        # Merge ball event stats (includes assists from goal_events)
         event_stats = event_detector.get_player_stats(pid)
         player_dict.update(event_stats)
 
         players.append(player_dict)
+
+    # ── Determine Man of the Match ─────────────────────────────────
+    best_player = max(players, key=lambda p: p.get("matchRating", 5.0))
+    for p in players:
+        p["manOfTheMatch"] = (p is best_player)
 
     update_fn(job_id, step="stats", progress=88, message="Building team stats...")
     team_stats = {
@@ -392,6 +397,7 @@ def process_video(video_path: str, job_id: str, update_fn) -> dict:
         "teamA": teamA_name, "teamB": teamB_name,
         "detectionBackend": backend,
         "players": players, "teamStats": team_stats,
+        "ballEvents": event_detector.goal_events,
     }
 
 

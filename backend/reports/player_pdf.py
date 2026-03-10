@@ -322,6 +322,7 @@ def generate_player_pdf(player: dict, match_results: dict, output_path: str):
 
     # Ball event stats
     ev_goals         = player.get("goals", 0)
+    ev_assists       = player.get("assists", 0)
     ev_xg            = player.get("xG", 0.0)
     ev_shots         = player.get("shots", 0)
     ev_shots_on_tgt  = player.get("shotsOnTarget", 0)
@@ -330,6 +331,7 @@ def generate_player_pdf(player: dict, match_results: dict, output_path: str):
     ev_tackles       = player.get("tackles", 0)
     ev_interceptions = player.get("interceptions", 0)
     ev_touches       = player.get("touches", 0)
+    is_motm          = player.get("manOfTheMatch", False)
 
     story += _page1(
         pid, team, team_color, position, total_dist, sprint_dist,
@@ -339,10 +341,11 @@ def generate_player_pdf(player: dict, match_results: dict, output_path: str):
         activity_rate=activity_rate, work_rate=work_rate, coverage_pct=coverage_pct,
         def_pct=def_pct, mid_pct=mid_pct, atk_pct=atk_pct,
         match_rating=match_rating, rating_grade=rating_grade,
-        ev_goals=ev_goals, ev_xg=ev_xg, ev_shots=ev_shots,
+        ev_goals=ev_goals, ev_assists=ev_assists, ev_xg=ev_xg, ev_shots=ev_shots,
         ev_shots_on_tgt=ev_shots_on_tgt, ev_passes=ev_passes,
         ev_pass_acc=ev_pass_acc, ev_tackles=ev_tackles,
         ev_interceptions=ev_interceptions, ev_touches=ev_touches,
+        is_motm=is_motm,
     )
     story.append(PageBreak())
 
@@ -372,9 +375,9 @@ def _page1(pid, team, team_color, position, total_dist, sprint_dist,
            activity_rate=0.0, work_rate=0.0, coverage_pct=0.0,
            def_pct=0.0, mid_pct=0.0, atk_pct=0.0,
            match_rating=5.0, rating_grade="",
-           ev_goals=0, ev_xg=0.0, ev_shots=0, ev_shots_on_tgt=0,
+           ev_goals=0, ev_assists=0, ev_xg=0.0, ev_shots=0, ev_shots_on_tgt=0,
            ev_passes=0, ev_pass_acc=0.0, ev_tackles=0,
-           ev_interceptions=0, ev_touches=0):
+           ev_interceptions=0, ev_touches=0, is_motm=False):
     elems = []
     elems.append(Spacer(1, 3 * mm))
 
@@ -462,6 +465,26 @@ def _page1(pid, team, team_color, position, total_dist, sprint_dist,
         ("LINEAFTER",     (1, 0), (1, -1),  1, BORDER),
     ]))
     elems.append(hdr)
+
+    # ── MAN OF THE MATCH BADGE ────────────────────────────────────────────────
+    if is_motm:
+        motm_banner = Table([[
+            Paragraph(
+                f'<font color="#080C12"><b>🏆 MAN OF THE MATCH — {player_name} — Rating {match_rating:.1f} {rating_grade}</b></font>',
+                _style("motm_b", fontSize=11, fontName="Helvetica-Bold",
+                       alignment=TA_CENTER, textColor=HexColor("#080C12"))
+            )
+        ]], colWidths=[PAGE_W - 30 * mm])
+        motm_banner.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, -1), HexColor("#FFD700")),
+            ("TOPPADDING",    (0, 0), (-1, -1), 7),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+            ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        elems.append(Spacer(1, 2 * mm))
+        elems.append(motm_banner)
+
     elems.append(Spacer(1, 4 * mm))
 
     # ── KPI ROW 1 ────────────────────────────────────────────────────────────
@@ -509,15 +532,15 @@ def _page1(pid, team, team_color, position, total_dist, sprint_dist,
 
     events_data = [
         [_ev_cell("Goals",        str(ev_goals),                 "#FFD600"),
-         _ev_cell("xG",           f"{ev_xg:.2f}",                "#FFD600")],
-        [_ev_cell("Shots",        str(ev_shots),                 "#FF6D00"),
-         _ev_cell("On Target",    str(ev_shots_on_tgt),          "#FF6D00")],
-        [_ev_cell("Passes",       str(ev_passes),                "#18FFFF"),
-         _ev_cell("Pass Acc",     f"{ev_pass_acc:.1f}%",         "#18FFFF")],
-        [_ev_cell("Tackles",      str(ev_tackles),               "#00E676"),
-         _ev_cell("Interceptions",str(ev_interceptions),         "#00E676")],
-        [_ev_cell("Ball Touches", str(ev_touches),               "#B0BEC5"),
-         Paragraph("", _style("ev_empty", fontSize=9))],
+         _ev_cell("Assists",      str(ev_assists),               "#FFD600")],
+        [_ev_cell("xG",           f"{ev_xg:.2f}",                "#FF6D00"),
+         _ev_cell("Shots",        str(ev_shots),                 "#FF6D00")],
+        [_ev_cell("On Target",    str(ev_shots_on_tgt),          "#FF6D00"),
+         _ev_cell("Passes",       str(ev_passes),                "#18FFFF")],
+        [_ev_cell("Pass Acc",     f"{ev_pass_acc:.1f}%",         "#18FFFF"),
+         _ev_cell("Tackles",      str(ev_tackles),               "#00E676")],
+        [_ev_cell("Interceptions",str(ev_interceptions),         "#00E676"),
+         _ev_cell("Ball Touches", str(ev_touches),               "#B0BEC5")],
     ]
     ev_table = Table(events_data, colWidths=[87 * mm, 87 * mm])
     ev_table.setStyle(TableStyle([

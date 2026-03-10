@@ -8,8 +8,10 @@ from collections import deque
 
 # Field dimensions
 FIELD_W, FIELD_H = 105.0, 68.0
-GOAL_Y_MIN, GOAL_Y_MAX = 30.34, 37.66   # goal width 7.32m centered at 34m
-GOAL_ZONE_DEPTH = 3.0                    # meters into field from goal line
+GOAL_Y_MIN, GOAL_Y_MAX = 25.0, 43.0     # wider goal zone (was 30.34-37.66)
+GOAL_ZONE_X_LEFT  = 3.0                  # ball x < 3 → left goal
+GOAL_ZONE_X_RIGHT = 102.0                # ball x > 102 → right goal
+GOAL_ZONE_DEPTH = 3.0                    # meters into field from goal line (legacy compat)
 
 def pixel_to_field(px, py, frame_w, frame_h):
     return (px / frame_w) * FIELD_W, (py / frame_h) * FIELD_H
@@ -77,6 +79,7 @@ class EventDetector:
         self.possession_id = None     # current possessing player id
         self.possession_team = None
         self.last_possession_id = None
+        self.prev_possession_id = None   # two possessors ago — for assist tracking
         self.frames_in_possession = 0
         self.MIN_POSSESSION_FRAMES = 8  # must hold ball 8+ frames to count
 
@@ -87,6 +90,9 @@ class EventDetector:
         self.POSSESSION_RADIUS_M = 3.0    # meters radius for possession
         self.SHOT_SPEED_THRESHOLD = 15.0  # m/s for shot detection
         self.TACKLE_RADIUS_M = 2.5
+
+        # Goal events list — each entry: {type, player_id, assist_player_id, minute}
+        self.goal_events: list[dict] = []
 
     def _find_possessor(self, ball_pos, players_current):
         """Find player closest to ball within possession radius."""
@@ -124,12 +130,17 @@ class EventDetector:
         return round(min(0.99, max(0.01, xg)), 3)
 
     def _is_goal_zone(self, fx, fy, attacking_right):
-        """Check if ball is in goal zone."""
+        """Check if ball is in goal zone (enhanced: x<3 or x>102, y 25-43m)."""
         in_y = GOAL_Y_MIN <= fy <= GOAL_Y_MAX
         if attacking_right:
-            return fx >= FIELD_W - GOAL_ZONE_DEPTH and in_y
+            return fx > GOAL_ZONE_X_RIGHT and in_y
         else:
-            return fx <= GOAL_ZONE_DEPTH and in_y
+            return fx < GOAL_ZONE_X_LEFT and in_y
+
+    def _is_any_goal(self, fx, fy):
+        """Check if ball crossed either goal line."""
+        in_y = GOAL_Y_MIN <= fy <= GOAL_Y_MAX
+        return (fx < GOAL_ZONE_X_LEFT or fx > GOAL_ZONE_X_RIGHT) and in_y
 
     def update(self, frame_idx, ball_field_pos, players_current, ball_tracker):
         """
@@ -180,6 +191,7 @@ class EventDetector:
                                 self.events[possessor_id]["interceptions"] += 1
                             self.tackle_cooldown[possessor_id] = int(self.fps * 3)
 
+            self.prev_possession_id = self.last_possession_id
             self.possession_id = possessor_id
             self.possession_team = possessor_team
             self.frames_in_possession = 0
@@ -208,15 +220,23 @@ class EventDetector:
                         self.events[shooter_id]["shotsOnTarget"] += 1
                     self.shot_cooldown = int(self.fps * 4)  # 4s cooldown
 
-        # ── Goal detection
-        if self.goal_cooldown <= 0 and self.last_possession_id:
-            for attacking_right in [True, False]:
-                if self._is_goal_zone(bx, by, attacking_right):
-                    scorer_id = self.last_possession_id
-                    if scorer_id and scorer_id in self.events:
-                        self.events[scorer_id]["goals"] += 1
-                    self.goal_cooldown = int(self.fps * 15)  # 15s cooldown
-                    break
+        # ── Goal detection (enhanced: x<3 or x>102, y 25-43m)
+        if self.goal_cooldown <= 0 and self._is_any_goal(bx, by):
+            scorer_id = self.last_possession_id
+            assist_id = self.prev_possession_id if self.prev_possession_id != scorer_id else None
+            if scorer_id and scorer_id in self.events:
+                self.events[scorer_id]["goals"] += 1
+            minute = int(frame_idx / (self.fps * 60)) if self.fps > 0 else 0
+            self.goal_events.append({
+                "type": "goal",
+                "player_id": scorer_id,
+                "assist_player_id": assist_id,
+                "minute": minute,
+            })
+            # Credit assist
+            if assist_id and assist_id in self.events:
+                pass  # assists aggregated in detector.py from goal_events
+            self.goal_cooldown = int(self.fps * 15)  # 15s cooldown
 
         if possessor_id:
             self.last_possession_id = possessor_id
@@ -230,6 +250,11 @@ class EventDetector:
         attempted = max(e.get("passesAttempted", 0), 1)
         successful = e.get("passes", 0)
         accuracy = round(successful / attempted * 100, 1)
+        # Count assists from goal_events
+        assists = sum(
+            1 for ev in self.goal_events
+            if ev.get("assist_player_id") == player_id
+        )
         return {
             "passes":          successful,
             "passesAttempted": e.get("passesAttempted", 0),
@@ -237,6 +262,7 @@ class EventDetector:
             "shots":           e.get("shots", 0),
             "shotsOnTarget":   e.get("shotsOnTarget", 0),
             "goals":           e.get("goals", 0),
+            "assists":         assists,
             "tackles":         e.get("tackles", 0),
             "interceptions":   e.get("interceptions", 0),
             "touches":         e.get("touches", 0),
