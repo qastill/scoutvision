@@ -212,7 +212,7 @@ def _team_comparison_page(team_a, team_b, team_stats, players):
         _cmp_row("Top Speed", f'{val(stats_a, "topSpeed")} km/h', f'{val(stats_b, "topSpeed")} km/h'),
         _cmp_row("Avg Rating", val(stats_a, "avgRating"), val(stats_b, "avgRating")),
         _cmp_row("Players", val(stats_a, "players"), val(stats_b, "players")),
-        _cmp_row("Best Player ID", f'#{best_a_id}', f'#{best_b_id}'),
+        _cmp_row("Best Player", f'#{best_a_id}', f'#{best_b_id}'),
     ]
 
     col_w = [(PAGE_W - 30 * mm) / 3] * 3
@@ -261,7 +261,7 @@ def _player_table_page(players):
     elems.append(Spacer(1, 2 * mm))
     elems.append(HRFlowable(width="100%", thickness=1, color=BORDER, spaceAfter=6))
 
-    headers = ["No", "ID", "Pos", "Team", "Dist(km)", "Sprint(km)", "Top Spd", "Sprints", "Rating"]
+    headers = ["No", "No.Jrsy", "Pos", "Team", "Dist(km)", "Sprint(km)", "Top Spd", "Sprints", "Rating"]
     header_row = [
         Paragraph(f'<font color="#FFD600"><b>{h}</b></font>',
                   _style("th", fontSize=7, alignment=TA_CENTER))
@@ -271,9 +271,14 @@ def _player_table_page(players):
     data_rows = [header_row]
     for i, p in enumerate(players):
         team_col = p.get("teamColor", "#FFFFFF")
+        pid = p["id"]
+        display_name = p.get("name", f"Pemain #{pid}")
+        display_number = str(p.get("number", pid))
+        # Truncate long names for table
+        display_name_short = display_name[:10] if len(display_name) > 10 else display_name
         row = [
             Paragraph(f'<font color="#B0BEC5">{i + 1}</font>', _style("td", fontSize=7, alignment=TA_CENTER)),
-            Paragraph(f'<font color="#FFFFFF"><b>#{p["id"]}</b></font>', _style("td", fontSize=7, alignment=TA_CENTER)),
+            Paragraph(f'<font color="#FFFFFF"><b>{display_number}</b></font>', _style("td", fontSize=7, alignment=TA_CENTER)),
             Paragraph(f'<font color="#18FFFF">{p.get("position", "CM")}</font>', _style("td", fontSize=7, alignment=TA_CENTER)),
             Paragraph(f'<font color="{team_col}">{p.get("team", "-")[:8]}</font>', _style("td", fontSize=6, alignment=TA_CENTER)),
             Paragraph(f'<font color="#FFFFFF">{p.get("totalDist", 0):.2f}</font>', _style("td", fontSize=7, alignment=TA_CENTER)),

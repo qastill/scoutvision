@@ -11,7 +11,7 @@ import requests
 import base64
 from datetime import datetime
 
-from processing.stats import calculate_player_stats, pixel_to_field, infer_position, build_team_stats
+from processing.stats import calculate_player_stats, calculate_match_rating, pixel_to_field, infer_position, build_team_stats
 from processing.teams import assign_teams, get_dominant_color
 
 FRAME_SAMPLE_RATE = 10   # sample every 10th frame
@@ -304,7 +304,10 @@ def process_video(video_path: str, job_id: str, update_fn) -> dict:
         pos            = infer_position(avg_x, avg_y, 0 if team_name == teamA_name else 1)
         jersey_color   = partial[idx]["jerseyColor"]
 
-        players.append({
+        # Compute match rating with position-weighted formula
+        match_rating   = calculate_match_rating(stats, pos)
+
+        player_dict = {
             "id": pid, "trackId": track_id,
             "team": team_name, "teamColor": team_color, "position": pos,
             "totalDist": stats["totalDist"],   "sprintDist": stats["sprintDist"],
@@ -314,7 +317,24 @@ def process_video(video_path: str, job_id: str, update_fn) -> dict:
             "avgX": round(avg_x, 1),           "avgY": round(avg_y, 1),
             "rating":    stats["rating"],      "fatigue":    stats["fatigue"],
             "jerseyColor": jersey_color,
-        })
+            # Auto-analytics
+            "avgSpeed":        stats.get("avgSpeed", 0.0),
+            "highIntensityKm": stats.get("highIntensityKm", 0.0),
+            "activityRate":    stats.get("activityRate", 0.0),
+            "attackPct":       stats.get("attackPct", 0.0),
+            "midPct":          stats.get("midPct", 0.0),
+            "defPct":          stats.get("defPct", 0.0),
+            "coveragePct":     stats.get("coveragePct", 0.0),
+            "avgSprintDistM":  stats.get("avgSprintDistM", 0.0),
+            "pressingEvents":  stats.get("pressingEvents", 0),
+            "posConsistency":  stats.get("posConsistency", 0.0),
+            "workRateIndex":   stats.get("workRateIndex", 0.0),
+            # Match rating
+            "matchRating":     match_rating["matchRating"],
+            "ratingGrade":     match_rating["ratingGrade"],
+            "ratingBreakdown": match_rating["ratingBreakdown"],
+        }
+        players.append(player_dict)
 
     update_fn(job_id, step="stats", progress=88, message="Building team stats...")
     team_stats = {
