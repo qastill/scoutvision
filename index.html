@@ -1224,8 +1224,19 @@ function renderResults() {
   const d = analysisData;
   const rs = document.getElementById('resultsSection');
 
-  // Team stats
-  const ts = d.teamStats;
+  // Team stats — handle both flat and nested {teamA,teamB} structure
+  const tsRaw = d.teamStats || {};
+  const tsA = tsRaw.teamA || tsRaw;
+  const tsB = tsRaw.teamB || {};
+  const ts = {
+    totalPlayers: d.players ? d.players.length : (tsA.players || 22),
+    totalDist:    ((tsA.totalDist||0) + (tsB.totalDist||0)).toFixed(2),
+    topSpeed:     Math.max(tsA.topSpeed||0, tsB.topSpeed||0),
+    totalSprints: d.players ? d.players.reduce((s,p)=>s+(p.sprints||0),0) : 0,
+    totalGoals:   (tsA.totalGoals||0) + (tsB.totalGoals||0),
+    totalShots:   (tsA.totalShots||0) + (tsB.totalShots||0),
+    totalPasses:  (tsA.totalPasses||0) + (tsB.totalPasses||0),
+  };
   document.getElementById('teamStats').innerHTML = `
     <div class="stat-card green">
       <div class="stat-label">Total Pemain</div>
@@ -1256,9 +1267,9 @@ function renderResults() {
 
   d.players.forEach(p => {
     const ratingClass = p.rating >= 8 ? 'rating-high' : p.rating >= 6.5 ? 'rating-mid' : 'rating-low';
-    const distPct = (p.totalDist / maxDist * 100).toFixed(0);
-    const sprintPct = (p.sprintDist / p.totalDist * 100).toFixed(0);
-    const speedPct = ((p.topSpeed - 15) / 25 * 100).toFixed(0);
+    const distPct = maxDist > 0 ? (p.totalDist / maxDist * 100).toFixed(0) : 0;
+    const sprintPct = (p.totalDist > 0 && p.sprintDist != null) ? (p.sprintDist / p.totalDist * 100).toFixed(0) : 0;
+    const speedPct = p.topSpeed > 0 ? Math.max(0,((p.topSpeed - 15) / 25 * 100)).toFixed(0) : 0;
 
     const card = document.createElement('div');
     card.className = 'player-card';
@@ -1357,12 +1368,13 @@ function openModal(player) {
   document.getElementById('modalPitch').innerHTML = pitchHtml;
 
   // Speed zones
-  const total = player.walk + player.jog + player.hiRun + player.sprintDist;
+  const w = player.walk||0, j = player.jog||0, h = player.hiRun||0, sp = player.sprintDist||0;
+  const total = w + j + h + sp || 1;
   const zones = [
-    { label:'Walk', color:'#4CC9F0', val:player.walk, pct:(player.walk/total*100).toFixed(0) },
-    { label:'Jog',  color:'#80ED99', val:player.jog,  pct:(player.jog/total*100).toFixed(0) },
-    { label:'Hi-Run',color:'#FFD60A',val:player.hiRun,pct:(player.hiRun/total*100).toFixed(0) },
-    { label:'Sprint',color:'#FF4D6D',val:player.sprintDist,pct:(player.sprintDist/total*100).toFixed(0) },
+    { label:'Walk',   color:'#4CC9F0', val:w,  pct:(w /total*100).toFixed(0) },
+    { label:'Jog',    color:'#80ED99', val:j,  pct:(j /total*100).toFixed(0) },
+    { label:'Hi-Run', color:'#FFD60A', val:h,  pct:(h /total*100).toFixed(0) },
+    { label:'Sprint', color:'#FF4D6D', val:sp, pct:(sp/total*100).toFixed(0) },
   ];
   document.getElementById('modalSpeedZones').innerHTML = zones.map(z => `
     <div class="zone">
