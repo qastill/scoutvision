@@ -213,6 +213,13 @@ def _team_comparison_page(team_a, team_b, team_stats, players):
         _cmp_row("Avg Rating", val(stats_a, "avgRating"), val(stats_b, "avgRating")),
         _cmp_row("Players", val(stats_a, "players"), val(stats_b, "players")),
         _cmp_row("Best Player", f'#{best_a_id}', f'#{best_b_id}'),
+        # Ball stats
+        _cmp_row("Total Passes", val(stats_a, "totalPasses"), val(stats_b, "totalPasses")),
+        _cmp_row("Avg Pass Accuracy", f'{val(stats_a, "avgPassAccuracy")}%', f'{val(stats_b, "avgPassAccuracy")}%'),
+        _cmp_row("Total Shots", val(stats_a, "totalShots"), val(stats_b, "totalShots")),
+        _cmp_row("Total xG", val(stats_a, "totalXg"), val(stats_b, "totalXg")),
+        _cmp_row("Total Goals", val(stats_a, "totalGoals"), val(stats_b, "totalGoals")),
+        _cmp_row("Total Tackles", val(stats_a, "totalTackles"), val(stats_b, "totalTackles")),
     ]
 
     col_w = [(PAGE_W - 30 * mm) / 3] * 3

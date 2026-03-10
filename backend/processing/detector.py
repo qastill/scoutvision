@@ -13,6 +13,7 @@ from datetime import datetime
 
 from processing.stats import calculate_player_stats, calculate_match_rating, pixel_to_field, infer_position, build_team_stats
 from processing.teams import assign_teams, get_dominant_color
+from processing.ball_tracker import BallTracker, EventDetector, pixel_to_field as ball_pixel_to_field
 
 FRAME_SAMPLE_RATE = 10   # sample every 10th frame
 MIN_TRACK_FRAMES  = 10
@@ -98,18 +99,23 @@ def _load_yolo():
 
 
 def _detect_yolo(model, frame):
-    """Run YOLOv8n on frame, return list of (cx, cy, conf)."""
+    """Run YOLOv8n on frame, return tuple (person_centroids, ball_centroids)."""
     try:
-        results = model(frame, classes=[0], conf=0.35, verbose=False)
-        centroids = []
+        results = model(frame, classes=[0, 32], conf=0.35, verbose=False)
+        persons = []
+        balls = []
         if results and results[0].boxes is not None:
             for box in results[0].boxes:
                 x1, y1, x2, y2 = box.xyxy[0].tolist()
                 cx, cy = int((x1 + x2) / 2), int((y1 + y2) / 2)
-                centroids.append((cx, cy))
-        return centroids
+                cls = int(box.cls[0].item())
+                if cls == 32:
+                    balls.append((cx, cy))
+                else:
+                    persons.append((cx, cy))
+        return persons, balls
     except Exception:
-        return []
+        return [], []
 
 
 def _detect_roboflow(frame, frame_w, frame_h):
@@ -191,6 +197,13 @@ def process_video(video_path: str, job_id: str, update_fn) -> dict:
     tracker     = CentroidTracker(max_disappeared=25)
     tracks: dict[int, dict] = {}
 
+    # Ball tracking & event detection
+    ball_tracker   = BallTracker(max_missing=15)
+    event_detector = EventDetector(fps, frame_w, frame_h)
+    # Maps tracker object ID → sequential player ID (1-22)
+    track_id_to_player: dict[int, int] = {}
+    next_player_id = 1
+
     frame_idx     = 0
     processed     = 0
     warmup        = int(fps * 3)
@@ -231,8 +244,9 @@ def process_video(video_path: str, job_id: str, update_fn) -> dict:
         if yolo_model:
             # YOLO on resized frame
             small = cv2.resize(frame, (640, int(frame_h * scale))) if scale < 1 else frame
-            raw = _detect_yolo(yolo_model, small)
-            centroids = [(int(cx / scale), int(cy / scale)) for cx, cy in raw]
+            raw_persons, raw_balls = _detect_yolo(yolo_model, small)
+            centroids     = [(int(cx / scale), int(cy / scale)) for cx, cy in raw_persons]
+            ball_detections = [(int(cx / scale), int(cy / scale)) for cx, cy in raw_balls]
 
         elif use_roboflow and rf_call_count < RF_CALL_LIMIT:
             small = cv2.resize(frame, (640, int(frame_h * scale)))
@@ -240,9 +254,11 @@ def process_video(video_path: str, job_id: str, update_fn) -> dict:
             rf_call_count += 1
             # Scale back
             centroids = [(int(cx / scale), int(cy / scale)) for cx, cy in centroids]
+            ball_detections = []
 
         else:
             centroids = _detect_mog2(fgbg, frame, scale, morph_k)
+            ball_detections = []
 
         # MOG2 warmup regardless
         small2 = cv2.resize(frame, (int(frame_w * scale), int(frame_h * scale)))
@@ -251,6 +267,27 @@ def process_video(video_path: str, job_id: str, update_fn) -> dict:
         # Dedup + cap
         centroids = _nms_centroids(centroids, min_dist=45)[:28]
         objects   = tracker.update(centroids)
+
+        # ── Assign sequential player IDs (first-appearance order, capped at 22) ──
+        for oid in objects:
+            if oid not in track_id_to_player and next_player_id <= TARGET_PLAYERS:
+                track_id_to_player[oid] = next_player_id
+                next_player_id += 1
+
+        # ── Ball tracking ────────────────────────────────────────────────────────
+        ball_field_pos = ball_tracker.update(ball_detections, frame_w, frame_h)
+
+        # Build players_current for event detector
+        players_current = {}
+        for oid, (cx, cy) in objects.items():
+            pid = track_id_to_player.get(oid)
+            if pid is None:
+                continue
+            fx, fy = ball_pixel_to_field(cx, cy, frame_w, frame_h)
+            team_name = tracks[oid].get("team", "Tim A") if oid in tracks else "Tim A"
+            players_current[pid] = (fx, fy, team_name)
+
+        event_detector.update(frame_idx, ball_field_pos, players_current, ball_tracker)
 
         for oid, (cx, cy) in objects.items():
             if oid not in tracks:
@@ -334,6 +371,10 @@ def process_video(video_path: str, job_id: str, update_fn) -> dict:
             "ratingGrade":     match_rating["ratingGrade"],
             "ratingBreakdown": match_rating["ratingBreakdown"],
         }
+        # Merge ball event stats
+        event_stats = event_detector.get_player_stats(pid)
+        player_dict.update(event_stats)
+
         players.append(player_dict)
 
     update_fn(job_id, step="stats", progress=88, message="Building team stats...")

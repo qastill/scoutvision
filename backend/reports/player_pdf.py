@@ -216,6 +216,50 @@ def _style(name, **kwargs):
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
+class HBarChart(Flowable):
+    """Simple horizontal bar chart for ball involvement."""
+    def __init__(self, bars, width=175 * mm, height=None):
+        """
+        bars: list of (label, value, max_value, color_hex, suffix)
+        """
+        Flowable.__init__(self)
+        self.bars = bars
+        self.width = width
+        self.row_h = 9 * mm
+        self.height = height or (len(bars) * self.row_h + 4 * mm)
+
+    def draw(self):
+        c = self.canv
+        label_w = 45 * mm
+        bar_area = self.width - label_w - 20 * mm
+        y = self.height - self.row_h
+
+        for label, value, max_val, color_hex, suffix in self.bars:
+            # Label
+            c.setFont("Helvetica", 7.5)
+            c.setFillColor(GREY)
+            c.drawString(0, y + self.row_h * 0.3, label)
+
+            # Background track
+            c.setFillColor(DARK_CARD)
+            c.roundRect(label_w, y + 1, bar_area, self.row_h - 3, 2, fill=1, stroke=0)
+
+            # Filled bar
+            fill = min(max(value / max(max_val, 0.001), 0.0), 1.0)
+            bar_w = bar_area * fill
+            if bar_w > 2:
+                c.setFillColor(HexColor(color_hex))
+                c.roundRect(label_w, y + 1, bar_w, self.row_h - 3, 2, fill=1, stroke=0)
+
+            # Value label
+            c.setFont("Helvetica-Bold", 7.5)
+            c.setFillColor(WHITE)
+            c.drawRightString(self.width, y + self.row_h * 0.3,
+                              f"{value:.1f}{suffix}" if isinstance(value, float) else f"{value}{suffix}")
+
+            y -= self.row_h
+
+
 def generate_player_pdf(player: dict, match_results: dict, output_path: str):
     doc = SimpleDocTemplate(
         output_path,
@@ -276,6 +320,17 @@ def generate_player_pdf(player: dict, match_results: dict, output_path: str):
         else "#808080"
     )
 
+    # Ball event stats
+    ev_goals         = player.get("goals", 0)
+    ev_xg            = player.get("xG", 0.0)
+    ev_shots         = player.get("shots", 0)
+    ev_shots_on_tgt  = player.get("shotsOnTarget", 0)
+    ev_passes        = player.get("passes", 0)
+    ev_pass_acc      = player.get("passAccuracy", 0.0)
+    ev_tackles       = player.get("tackles", 0)
+    ev_interceptions = player.get("interceptions", 0)
+    ev_touches       = player.get("touches", 0)
+
     story += _page1(
         pid, team, team_color, position, total_dist, sprint_dist,
         top_speed, sprints, fatigue, avg_x, avg_y,
@@ -284,6 +339,10 @@ def generate_player_pdf(player: dict, match_results: dict, output_path: str):
         activity_rate=activity_rate, work_rate=work_rate, coverage_pct=coverage_pct,
         def_pct=def_pct, mid_pct=mid_pct, atk_pct=atk_pct,
         match_rating=match_rating, rating_grade=rating_grade,
+        ev_goals=ev_goals, ev_xg=ev_xg, ev_shots=ev_shots,
+        ev_shots_on_tgt=ev_shots_on_tgt, ev_passes=ev_passes,
+        ev_pass_acc=ev_pass_acc, ev_tackles=ev_tackles,
+        ev_interceptions=ev_interceptions, ev_touches=ev_touches,
     )
     story.append(PageBreak())
 
@@ -296,6 +355,9 @@ def generate_player_pdf(player: dict, match_results: dict, output_path: str):
         pos_consistency=pos_consistency, work_rate=work_rate,
         coverage_pct=coverage_pct, rating_bd=rating_bd,
         match_rating=match_rating,
+        ev_passes=ev_passes, ev_pass_acc=ev_pass_acc,
+        ev_shots=ev_shots, ev_shots_on_tgt=ev_shots_on_tgt,
+        ev_goals=ev_goals, ev_tackles=ev_tackles,
     )
 
     doc.build(story, onFirstPage=_page_bg, onLaterPages=_page_bg)
@@ -309,7 +371,10 @@ def _page1(pid, team, team_color, position, total_dist, sprint_dist,
            player_name="", player_number="", photo_path=None,
            activity_rate=0.0, work_rate=0.0, coverage_pct=0.0,
            def_pct=0.0, mid_pct=0.0, atk_pct=0.0,
-           match_rating=5.0, rating_grade=""):
+           match_rating=5.0, rating_grade="",
+           ev_goals=0, ev_xg=0.0, ev_shots=0, ev_shots_on_tgt=0,
+           ev_passes=0, ev_pass_acc=0.0, ev_tackles=0,
+           ev_interceptions=0, ev_touches=0):
     elems = []
     elems.append(Spacer(1, 3 * mm))
 
@@ -428,6 +493,46 @@ def _page1(pid, team, team_color, position, total_dist, sprint_dist,
     elems.append(HRFlowable(width="100%", thickness=1, color=BORDER))
     elems.append(Spacer(1, 4 * mm))
 
+    # ── MATCH EVENTS ─────────────────────────────────────────────────────────
+    elems.append(Paragraph(
+        '<font color="#FFD600">MATCH EVENTS</font>',
+        _style("me_sec", fontSize=12, fontName="Helvetica-Bold")
+    ))
+    elems.append(Spacer(1, 3 * mm))
+
+    def _ev_cell(label, value, color):
+        return Paragraph(
+            f'<font color="#B0BEC5">{label}: </font>'
+            f'<font color="{color}"><b>{value}</b></font>',
+            _style(f"ev_{label}", fontSize=9)
+        )
+
+    events_data = [
+        [_ev_cell("Goals",        str(ev_goals),                 "#FFD600"),
+         _ev_cell("xG",           f"{ev_xg:.2f}",                "#FFD600")],
+        [_ev_cell("Shots",        str(ev_shots),                 "#FF6D00"),
+         _ev_cell("On Target",    str(ev_shots_on_tgt),          "#FF6D00")],
+        [_ev_cell("Passes",       str(ev_passes),                "#18FFFF"),
+         _ev_cell("Pass Acc",     f"{ev_pass_acc:.1f}%",         "#18FFFF")],
+        [_ev_cell("Tackles",      str(ev_tackles),               "#00E676"),
+         _ev_cell("Interceptions",str(ev_interceptions),         "#00E676")],
+        [_ev_cell("Ball Touches", str(ev_touches),               "#B0BEC5"),
+         Paragraph("", _style("ev_empty", fontSize=9))],
+    ]
+    ev_table = Table(events_data, colWidths=[87 * mm, 87 * mm])
+    ev_table.setStyle(TableStyle([
+        ("ROWBACKGROUNDS", (0, 0), (-1, -1), [DARK_CARD, MID_CARD]),
+        ("TOPPADDING",     (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING",  (0, 0), (-1, -1), 5),
+        ("LEFTPADDING",    (0, 0), (-1, -1), 8),
+        ("GRID",           (0, 0), (-1, -1), 0.3, BORDER),
+        ("VALIGN",         (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    elems.append(ev_table)
+    elems.append(Spacer(1, 4 * mm))
+    elems.append(HRFlowable(width="100%", thickness=1, color=BORDER))
+    elems.append(Spacer(1, 4 * mm))
+
     # ── FIELD POSITION ZONE ──────────────────────────────────────────────────
     elems.append(Paragraph(
         '<font color="#FFD600">FIELD POSITION ZONE</font>',
@@ -500,7 +605,9 @@ def _page2(pid, total_dist, walk_km, jog_km, hirun_km, sprint_dist,
            avg_speed=0.0, hi_km=0.0, activity_rate=0.0,
            avg_sprint_m=0.0, pressing=0, pos_consistency=0.0,
            work_rate=0.0, coverage_pct=0.0,
-           rating_bd=None, match_rating=5.0):
+           rating_bd=None, match_rating=5.0,
+           ev_passes=0, ev_pass_acc=0.0, ev_shots=0, ev_shots_on_tgt=0,
+           ev_goals=0, ev_tackles=0):
     rating_bd = rating_bd or {}
     elems = []
     elems.append(Spacer(1, 3 * mm))
@@ -639,6 +746,28 @@ def _page2(pid, total_dist, walk_km, jog_km, hirun_km, sprint_dist,
     ]))
     elems.append(two_col)
     elems.append(Spacer(1, 5 * mm))
+    elems.append(HRFlowable(width="100%", thickness=1, color=BORDER))
+    elems.append(Spacer(1, 4 * mm))
+
+    # ── BALL INVOLVEMENT ─────────────────────────────────────────────────────
+    elems.append(Paragraph(
+        '<font color="#FFD600">BALL INVOLVEMENT</font>',
+        _style("bi_sec", fontSize=12, fontName="Helvetica-Bold")
+    ))
+    elems.append(Spacer(1, 3 * mm))
+
+    # Contribution index = (passes*0.5 + tackles*1.5 + goals*5 + shots*1) normalized 0-10
+    contrib_raw = ev_passes * 0.5 + ev_tackles * 1.5 + ev_goals * 5 + ev_shots * 1.0
+    contrib_idx = round(min(10.0, contrib_raw / 5.0), 1)  # normalize: 50 raw = 10
+
+    bi_bars = [
+        ("Pass Accuracy",   ev_pass_acc,         100.0, "#18FFFF", "%"),
+        ("Shots",           float(ev_shots),       10.0, "#FF6D00", ""),
+        ("Shots on Target", float(ev_shots_on_tgt), 10.0, "#FFD600", ""),
+        ("Contribution Idx",contrib_idx,           10.0, "#00E676", "/10"),
+    ]
+    elems.append(HBarChart(bi_bars, width=175 * mm))
+    elems.append(Spacer(1, 4 * mm))
     elems.append(HRFlowable(width="100%", thickness=1, color=BORDER))
     elems.append(Spacer(1, 4 * mm))
 

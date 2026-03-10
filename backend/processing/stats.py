@@ -331,6 +331,13 @@ def build_team_stats(players: list[dict], team_name: str) -> dict:
     avg_rating = sum(p["rating"] for p in team) / len(team)
     best = max(team, key=lambda p: p["rating"])
 
+    total_passes   = sum(p.get("passes", 0) for p in team)
+    avg_pass_acc   = round(sum(p.get("passAccuracy", 0) for p in team) / max(len(team), 1), 1)
+    total_shots    = sum(p.get("shots", 0) for p in team)
+    total_xg       = round(sum(p.get("xG", 0) for p in team), 2)
+    total_goals    = sum(p.get("goals", 0) for p in team)
+    total_tackles  = sum(p.get("tackles", 0) for p in team)
+
     return {
         "name": team_name,
         "players": len(team),
@@ -340,4 +347,10 @@ def build_team_stats(players: list[dict], team_name: str) -> dict:
         "topSpeed": round(top_speed, 1),
         "avgRating": round(avg_rating, 1),
         "bestPlayer": best["id"],
+        "totalPasses": total_passes,
+        "avgPassAccuracy": avg_pass_acc,
+        "totalShots": total_shots,
+        "totalXg": total_xg,
+        "totalGoals": total_goals,
+        "totalTackles": total_tackles,
     }
